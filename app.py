@@ -22,7 +22,8 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     # Read data from the Google Sheet (Now 13 columns)
-    df = conn.read(worksheet="Logs", usecols=list(range(13)), ttl=0) # ttl=0 for instant updates
+    # ttl=0 ensures we don't cache old data
+    df = conn.read(worksheet="Logs", usecols=list(range(13)), ttl=0)
     return df
 
 def update_data(df):
@@ -33,12 +34,31 @@ st.title("🚀 2026 Growth Dashboard")
 current_month = date.today().month
 st.markdown(f"### 🎯 Focus: **{AI_ROADMAP[current_month]}**")
 
-# --- LOAD DATA ---
+# --- LOAD & CLEAN DATA ---
 try:
     df = get_data()
+    
+    # 1. Fix Date Column
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    
+    # 2. Fix Boolean/Numeric Columns (CRITICAL FIX FOR ERROR)
+    # We force all habit columns to be 0 or 1.
+    habit_cols = ["Workout", "Code", "Read", "NoJunk", "Connect", "SideHustle"]
+    
+    def clean_bool(val):
+        # Convert diverse inputs (True, "TRUE", 1, "1") to simple integer 1
+        if str(val).upper() in ["TRUE", "1", "T", "YES", "ON"]:
+            return 1
+        return 0
+
+    for col in habit_cols:
+        # Fill missing values with 0 first
+        df[col] = df[col].fillna(0)
+        # Apply cleaning function
+        df[col] = df[col].apply(clean_bool)
+
 except Exception as e:
-    st.error("Could not connect to Database. Please check secrets and sheet headers.")
+    st.error(f"Data Error: {e}")
     st.stop()
 
 # --- INPUT SECTION (SIDEBAR) ---
@@ -83,16 +103,12 @@ with st.sidebar:
         sidehustle = c11.checkbox("🎥 YouTube")
         sidehustle_det = c12.text_input("Progress?", placeholder="e.g. Scripting Video #2")
 
-        # Validation Warning
-        if (workout and not workout_det) or (code and not code_det):
-            st.caption("⚠️ *Please fill details for checked items!*")
-
         submit = st.form_submit_button("Save to Cloud ☁️")
 
         if submit:
-            # Enforce mandatory details
+            # Mandatory check
             if (workout and not workout_det) or (code and not code_det) or (read and not read_det):
-                st.error("❌ You cannot cheat! Fill in the details.")
+                st.error("❌ Fill in the details for what you checked!")
             else:
                 new_data = pd.DataFrame([{
                     "Date": today, 
@@ -125,7 +141,6 @@ if not df.empty:
     this_week = df[df["Week"] == current_week_num]
     connect_count = this_week["Connect"].sum()
     connect_target = 2
-    connect_score = min(connect_count, connect_target) # Cap at target for scoring
     
     # Display Top Metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -133,7 +148,6 @@ if not df.empty:
     with col2: st.metric("Workouts", f"{this_month['Workout'].sum()} Days")
     with col3: st.metric("Connect (Week)", f"{connect_count} / {connect_target}")
     with col4: 
-        # Simple monthly score
         total_days = len(this_month)
         if total_days > 0:
             score = int(((this_month["Workout"].sum() + this_month["Code"].sum()) / (total_days * 2)) * 100)
@@ -155,17 +169,19 @@ if not df.empty:
         
         # Aggregation Logic
         if time_view == "Weekly Sum":
-            plot_df = plot_df.groupby("Week")[["Workout", "Code", "Read", "NoJunk", "Connect", "SideHustle"]].sum().reset_index()
+            plot_df = plot_df.groupby("Week")[habit_cols].sum().reset_index()
             x_axis = "Week"
         elif time_view == "Monthly Sum":
-            plot_df = plot_df.groupby("Month")[["Workout", "Code", "Read", "NoJunk", "Connect", "SideHustle"]].sum().reset_index()
+            plot_df = plot_df.groupby("Month")[habit_cols].sum().reset_index()
             x_axis = "Month"
         else:
             x_axis = "Date"
 
         # Melt for plotting
         melted_df = plot_df.melt(id_vars=[x_axis], var_name="Habit", value_name="Count")
-        # Filter out 0s for cleaner charts
+        
+        # Ensure Count is numeric before filtering (The Fix)
+        melted_df["Count"] = pd.to_numeric(melted_df["Count"], errors='coerce').fillna(0)
         melted_df = melted_df[melted_df["Count"] > 0]
 
         if chart_type == "Bar Chart":
@@ -173,14 +189,13 @@ if not df.empty:
         elif chart_type == "Line Chart":
             fig = px.line(melted_df, x=x_axis, y="Count", color="Habit", markers=True, title="Consistency Trends")
         elif chart_type == "Pie Chart":
-            # Pie only makes sense for totals, so we sum the current view
             total_counts = melted_df.groupby("Habit")["Count"].sum().reset_index()
             fig = px.pie(total_counts, values="Count", names="Habit", title="Effort Distribution")
 
         st.plotly_chart(fig, use_container_width=True)
 
     # --- DETAILED HISTORY ---
-    with st.expander("📂 View Detailed Journal (What did I actually do?)"):
+    with st.expander("📂 View Detailed Journal"):
         st.dataframe(df.sort_values("Date", ascending=False))
         
 else:
