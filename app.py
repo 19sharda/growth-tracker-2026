@@ -2,19 +2,17 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import time
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="2026 Growth Tracker", page_icon="🚀", layout="wide")
 
-# --- SESSION STATE ---
-if 'step' not in st.session_state:
-    st.session_state.step = 0
-if 'answers' not in st.session_state:
-    st.session_state.answers = {}
+# --- ASSETS ---
+GIF_HIGH = "https://gifdb.com/images/high/weight-lifting-machio-naruzo-muscles-b7iwxzcmqu9iqm8v.gif"
+GIF_MID = "https://gifdb.com/images/high/weight-lifting-one-piece-zoro-dumbbell-9fijwjssrinfxgsf.gif"
+GIF_LOW = "https://gifdb.com/images/high/weight-lifting-nijigasaki-kasumi-nakasu-i8k4v57vhfxyaqur.gif"
 
-# --- AI ROADMAP ---
 AI_ROADMAP = {
     1: "Jan: Python Basics & OOP", 2: "Feb: Automation Framework",
     3: "Mar: API Testing & Reporting", 4: "Apr: LangChain & RAG",
@@ -24,13 +22,14 @@ AI_ROADMAP = {
     11: "Nov: Optimization", 12: "Dec: Capstone Project"
 }
 
-# --- ANIMATION ASSETS ---
-# 4+ Tasks (High Performance)
-GIF_HIGH = "https://gifdb.com/images/high/weight-lifting-machio-naruzo-muscles-b7iwxzcmqu9iqm8v.gif"
-# 3 Tasks (Medium Performance)
-GIF_MID = "https://gifdb.com/images/high/weight-lifting-one-piece-zoro-dumbbell-9fijwjssrinfxgsf.gif"
-# <3 Tasks (Low Performance)
-GIF_LOW = "https://gifdb.com/images/high/weight-lifting-nijigasaki-kasumi-nakasu-i8k4v57vhfxyaqur.gif"
+QUESTIONS = [
+    {"key": "Workout", "icon": "💪", "color": "red", "q": "Did you WORKOUT today?", "ask_detail": "What exercise?"},
+    {"key": "Code", "icon": "💻", "color": "blue", "q": "Did you CODE/AI today?", "ask_detail": "Topic studied?"},
+    {"key": "Read", "icon": "📚", "color": "orange", "q": "Did you READ 10 mins?", "ask_detail": "Book/Page?"},
+    {"key": "NoJunk", "icon": "🥦", "color": "green", "q": "Did you eat CLEAN?", "ask_detail": "What meal?"},
+    {"key": "Connect", "icon": "🤝", "color": "pink", "q": "Did you CONNECT?", "ask_detail": "Who?"},
+    {"key": "SideHustle", "icon": "🎥", "color": "violet", "q": "SIDE HUSTLE work?", "ask_detail": "Progress?"}
+]
 
 # --- CONNECT TO DB ---
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -38,52 +37,65 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def get_data():
     try:
         conn.reset()
-        return conn.read(worksheet="Logs", usecols=list(range(13)), ttl=0)
+        return conn.read(worksheet="Logs", usecols=list(range(14)), ttl=0)
     except:
         return pd.DataFrame()
 
 def update_data(df):
     conn.update(worksheet="Logs", data=df)
 
-# --- CONFIG FOR QUESTIONS ---
-QUESTIONS = [
-    {
-        "key": "Workout", "icon": "💪", "color": "red",
-        "q": "Did you WORKOUT today?", 
-        "ask_detail": "What exercise did you do?",
-        "success_msg": "Gains secured!"
-    },
-    {
-        "key": "Code", "icon": "💻", "color": "blue",
-        "q": "Did you CODE or Learn AI?", 
-        "ask_detail": "What topic did you study?",
-        "success_msg": "Brain power up!"
-    },
-    {
-        "key": "Read", "icon": "📚", "color": "orange",
-        "q": "Did you READ 10 mins?", 
-        "ask_detail": "Which book and page?",
-        "success_msg": "Wisdom acquired!"
-    },
-    {
-        "key": "NoJunk", "icon": "🥦", "color": "green",
-        "q": "Did you eat CLEAN (No Junk)?", 
-        "ask_detail": "What was your healthy meal?",
-        "success_msg": "Body fueled!"
-    },
-    {
-        "key": "Connect", "icon": "🤝", "color": "pink", # CHANGED ICON HERE
-        "q": "Did you CONNECT with someone?", 
-        "ask_detail": "Who did you call/meet?",
-        "success_msg": "Bond strengthened!"
-    },
-    {
-        "key": "SideHustle", "icon": "🎥", "color": "violet",
-        "q": "Did you do SIDE HUSTLE work?", 
-        "ask_detail": "What progress did you make?",
-        "success_msg": "Empire building!"
-    }
-]
+# --- HELPER: SAVE LOGIC ---
+def save_partial_log(date_obj, key, val, detail):
+    df = get_data()
+    if not df.empty:
+        df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    
+    if not df.empty and date_obj in df["Date"].values:
+        mask = df["Date"] == date_obj
+        df.loc[mask, key] = val
+        df.loc[mask, f"{key}_Detail"] = detail
+        final_df = df
+    else:
+        new_row = {"Date": date_obj}
+        for q in QUESTIONS:
+            new_row[q["key"]] = 0
+            new_row[f"{q['key']}_Detail"] = ""
+        new_row["Next_Goal"] = ""
+        new_row[key] = val
+        new_row[f"{key}_Detail"] = detail
+        new_df = pd.DataFrame([new_row])
+        final_df = pd.concat([df, new_df], ignore_index=True)
+    
+    update_data(final_df)
+    
+    # Perfection Check
+    today_row = final_df[final_df["Date"] == date_obj].iloc[0]
+    total_done = sum([1 for q in QUESTIONS if today_row.get(q["key"], 0) == 1])
+    
+    if total_done == 6:
+        st.balloons()
+        st.toast("🏆 PERFECTION! 6/6 Habits Done!", icon="🎉")
+    else:
+        st.toast(f"Saved {key}! ({total_done}/6 Done)", icon="✅")
+    time.sleep(1)
+    st.rerun()
+
+def save_goal(date_obj, goal_text):
+    df = get_data()
+    if not df.empty: df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    
+    if not df.empty and date_obj in df["Date"].values:
+        df.loc[df["Date"] == date_obj, "Next_Goal"] = goal_text
+        final_df = df
+    else:
+        new_row = {"Date": date_obj, "Next_Goal": goal_text}
+        for q in QUESTIONS: new_row[q["key"]] = 0
+        final_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        
+    update_data(final_df)
+    st.toast("Goal Committed!", icon="🔮")
+    time.sleep(1)
+    st.rerun()
 
 # --- APP START ---
 st.title("🚀 2026 Growth Dashboard")
@@ -97,186 +109,136 @@ try:
         df["Date"] = pd.to_datetime(df["Date"]).dt.date
         habit_cols = [q["key"] for q in QUESTIONS]
         def clean_bool(val):
-            try:
-                return 1 if float(val) > 0 else 0
-            except:
-                return 1 if str(val).upper() in ["TRUE", "T", "YES", "ON"] else 0
+            try: return 1 if float(val) > 0 else 0
+            except: return 1 if str(val).upper() in ["TRUE", "T", "YES", "ON"] else 0
         for col in habit_cols:
             if col in df.columns:
                 df[col] = df[col].fillna(0).apply(clean_bool)
-except Exception as e:
-    st.error("DB Connection Issue - Try Refreshing")
+except:
+    st.error("DB Connection Error")
     st.stop()
 
-# --- WIZARD SIDEBAR LOGIC ---
-with st.sidebar:
-    st.header("📝 Daily Log Wizard")
-    today = date.today()
-    total_steps = len(QUESTIONS)
-    
-    # --- STEP 0: START SCREEN ---
-    if st.session_state.step == 0:
-        if not df.empty and today in df["Date"].values:
-            st.warning(f"⚠️ Log for {today} exists.")
-            st.caption("Continuing will overwrite it.")
-        
-        st.write("Ready to log your wins?")
-        if st.button("🚀 Start Daily Log", type="primary", use_container_width=True):
-            st.session_state.step = 1
-            st.session_state.answers = {}
-            st.rerun()
+today = date.today()
 
-    # --- STEPS 1 to 6: QUESTIONS ---
-    elif 1 <= st.session_state.step <= total_steps:
-        q_index = st.session_state.step - 1
-        current_q = QUESTIONS[q_index]
-        
-        # PROGRESS
-        progress_val = (st.session_state.step - 1) / total_steps
-        st.progress(progress_val)
-        st.caption(f"Question {st.session_state.step} / {total_steps}")
-        
-        st.subheader(f"{current_q['icon']} {current_q['key']}")
-        st.write(f"**{current_q['q']}**")
-        
-        response = st.radio("Select:", ["No", "Yes"], index=0, key=f"radio_{q_index}")
-        
-        detail_input = ""
-        if response == "Yes":
-            detail_input = st.text_input(current_q['ask_detail'], key=f"text_{q_index}")
-        
-        col_back, col_next = st.columns([1, 2])
-        if col_back.button("⬅️ Back"):
-            st.session_state.step -= 1
-            st.rerun()
-            
-        if col_next.button("Next ➡️", type="primary"):
-            if response == "Yes" and detail_input.strip() == "":
-                st.error("⚠️ Please type what you did!")
-            else:
-                st.session_state.answers[current_q['key']] = 1 if response == "Yes" else 0
-                st.session_state.answers[f"{current_q['key']}_Detail"] = detail_input
-                
-                if response == "Yes":
-                    st.toast(current_q['success_msg'], icon=current_q['icon'])
-                
-                st.session_state.step += 1
-                st.rerun()
+# --- TOP STATS & GIF ---
+today_progress = 0
+if not df.empty and today in df["Date"].values:
+    row = df[df["Date"] == today].iloc[0]
+    today_progress = sum([1 for q in QUESTIONS if clean_bool(row.get(q["key"], 0)) == 1])
 
-    # --- STEP 7: REVIEW & SAVE ---
-    elif st.session_state.step > total_steps:
-        st.progress(1.0)
-        st.subheader("✅ Summary for Today")
-        
-        score_count = 0
-        for q in QUESTIONS:
-            key = q["key"]
-            val = st.session_state.answers.get(key, 0)
-            detail = st.session_state.answers.get(f"{key}_Detail", "")
-            if val == 1:
-                st.success(f"**{key}:** {detail}")
-                score_count += 1
-            else:
-                st.markdown(f"❌ {key}")
-        
-        st.divider()
-        col_edit, col_save = st.columns([1, 2])
-        
-        if col_edit.button("🔄 Edit"):
-            st.session_state.step = 1
-            st.rerun()
-            
-        if col_save.button("💾 Save to Cloud", type="primary"):
-            row_data = {"Date": today}
-            for k, v in st.session_state.answers.items():
-                row_data[k] = v
-            
-            new_df = pd.DataFrame([row_data])
-            
-            if not df.empty:
-                final_df = df[df["Date"] != today]
-                final_df = pd.concat([final_df, new_df], ignore_index=True)
-            else:
-                final_df = new_df
-                
-            update_data(final_df)
-            
-            # --- 🏃 DYNAMIC ANIMATION LOGIC 🏃 ---
-            if score_count >= 4:
-                st.image(GIF_HIGH, caption="Beast Mode Activated! 🔥")
-                st.balloons()
-            elif score_count == 3:
-                st.image(GIF_MID, caption="Solid Work! Keep Pushing. ⚔️")
-            else:
-                st.image(GIF_LOW, caption="Let's do better tomorrow! 🌱")
-                
-            st.success("Saved Successfully!")
-            time.sleep(4) 
-            st.session_state.step = 0
-            st.rerun()
+if today_progress >= 4:
+    current_gif = GIF_HIGH
+    status_msg = f"🔥 **BEAST MODE!** ({today_progress}/6)"
+elif today_progress == 3:
+    current_gif = GIF_MID
+    status_msg = f"⚔️ **MOMENTUM...** ({today_progress}/6)"
+else:
+    current_gif = GIF_LOW
+    status_msg = f"🌱 **WARMING UP...** ({today_progress}/6)"
 
-# --- ANALYTICS DASHBOARD ---
+c1, c2 = st.columns([1, 4])
+with c1: st.image(current_gif, use_container_width=True)
+with c2:
+    st.info(status_msg)
+    today_goal_msg = "No goal set."
+    if not df.empty:
+        yest = today - timedelta(days=1)
+        y_row = df[df["Date"] == yest]
+        if not y_row.empty and "Next_Goal" in y_row.columns:
+            g = y_row.iloc[0]["Next_Goal"]
+            if pd.notna(g) and str(g).strip(): today_goal_msg = f"🔮 **Target:** {g}"
+    st.write(today_goal_msg)
+    with st.popover("Set Tomorrow's Goal"):
+        new_g = st.text_input("One Goal:")
+        if st.button("Commit"): save_goal(today, new_g)
+
+st.divider()
+
+# --- CONTROL CENTER ---
+st.subheader("📝 Daily Control Center")
+today_data = {}
+if not df.empty and today in df["Date"].values:
+    r = df[df["Date"] == today].iloc[0]
+    for q in QUESTIONS:
+        k = q["key"]
+        val = clean_bool(r.get(k, 0))
+        det = r.get(f"{k}_Detail", "")
+        today_data[k] = {"done": val == 1, "detail": det}
+
+cols = st.columns(3) + st.columns(3)
+for idx, q in enumerate(QUESTIONS):
+    key = q["key"]
+    stat = today_data.get(key, {"done": False, "detail": ""})
+    icon = "✅" if stat["done"] else "⬜"
+    with cols[idx]:
+        with st.expander(f"{icon} {key}", expanded=not stat["done"]):
+            st.caption(q["q"])
+            with st.form(f"f_{key}"):
+                chk = st.checkbox("Done?", value=stat["done"])
+                det = st.text_input(q["ask_detail"], value=str(stat["detail"]) if pd.notna(stat["detail"]) else "")
+                if st.form_submit_button("Save"):
+                    if chk and not det.strip(): st.error("Detail needed!")
+                    else: save_partial_log(today, key, 1 if chk else 0, det)
+
+# --- ANALYTICS ---
 if not df.empty:
     st.divider()
+    st.subheader("📊 Performance & Rewards")
     
-    # METRICS
-    df["Month"] = pd.to_datetime(df["Date"]).dt.month
+    # 1. METRICS ROW
+    m1, m2, m3, m4 = st.columns(4)
+    this_month = df[pd.to_datetime(df["Date"]).dt.month == current_month]
+    
+    # WEEKLY JACKPOT LOGIC
+    # Get current week data (Mon-Sat only)
+    curr_week_num = today.isocalendar().week
     df["Week"] = pd.to_datetime(df["Date"]).dt.isocalendar().week
-    this_month = df[df["Month"] == current_month]
+    df["DayOfWeek"] = pd.to_datetime(df["Date"]).dt.dayofweek # 0=Mon, 6=Sun
     
-    curr_week = date.today().isocalendar()[1]
-    connect_week = df[df["Week"] == curr_week]["Connect"].sum()
+    this_week_df = df[(df["Week"] == curr_week_num) & (df["DayOfWeek"] != 6)]
     
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Coding Streak", f"{int(this_month['Code'].sum())} d")
-    c2.metric("Workouts", f"{int(this_month['Workout'].sum())} d")
-    c3.metric("Connect (Week)", f"{int(connect_week)}/2")
+    # Calculate Weekly Score
+    habit_keys = [q["key"] for q in QUESTIONS]
+    tasks_done = this_week_df[habit_keys].sum().sum()
     
-    days = len(this_month)
-    if days > 0:
-        habit_cols = [q["key"] for q in QUESTIONS]
-        pts = this_month[habit_cols].sum().sum()
-        score = int((pts / (days * 6)) * 100)
-        c4.metric("Discipline", f"{score}%")
+    # Total possible so far this week (Dynamic: Today's day index + 1 * 6 habits)
+    # Or Fixed: Total possible for a FULL week is 36
+    # Let's use FIXED 36 to show progress towards the weekly goal
+    total_possible_week = 36 
     
-    st.divider()
+    weekly_pct = 0
+    if total_possible_week > 0:
+        weekly_pct = int((tasks_done / total_possible_week) * 100)
     
-    # CHARTS
-    col_chart, col_opts = st.columns([3, 1])
-    with col_opts:
-        c_type = st.radio("Chart:", ["Bar", "Line", "Pie"])
-        t_view = st.radio("View:", ["Daily", "Weekly", "Monthly"])
-        
-    with col_chart:
-        habit_cols = [q["key"] for q in QUESTIONS]
-        plot_df = df.copy()
-        
-        # --- FIXED CHART LOGIC ---
-        if t_view == "Weekly": 
-            plot_df = plot_df.groupby("Week")[habit_cols].sum().reset_index()
-            x_ax = "Week"
-        elif t_view == "Monthly":
-            plot_df = plot_df.groupby("Month")[habit_cols].sum().reset_index()
-            x_ax = "Month"
-        else:
-            x_ax = "Date"
-            # Daily View: Filter to keep only Date + Habits
-            plot_df = plot_df[[x_ax] + habit_cols]
+    reward_points = 0
+    reward_status = "❌ Locked"
+    if weekly_pct > 50:
+        reward_points = int(weekly_pct) * 50
+        reward_status = "🔓 UNLOCKED!"
+    
+    m1.metric("Weekly Progress", f"{weekly_pct}%", f"{tasks_done}/36 Tasks")
+    m2.metric("Weekly Jackpot", f"{reward_points} Pts", reward_status)
+    
+    # LIFETIME POINTS (Simple accumulation for fun)
+    total_habits_all_time = df[habit_keys].sum().sum()
+    lifetime_score = int(total_habits_all_time * 10) + (reward_points if weekly_pct > 50 else 0)
+    m3.metric("Lifetime Score", f"{lifetime_score}", "XP")
+    
+    # Discipline Score (Mon-Sat)
+    work_days = this_month[pd.to_datetime(this_month["Date"]).dt.dayofweek != 6]
+    if len(work_days) > 0:
+        d_score = int((work_days[habit_keys].sum().sum() / (len(work_days) * 6)) * 100)
+        m4.metric("Discipline (Mon-Sat)", f"{d_score}%")
+    else:
+        m4.metric("Discipline", "0%")
 
-        melted = plot_df.melt(id_vars=[x_ax], value_vars=habit_cols, var_name="Habit", value_name="Count")
-        melted["Count"] = pd.to_numeric(melted["Count"], errors='coerce').fillna(0)
-        melted = melted[melted["Count"] > 0]
-        
-        if c_type == "Bar":
-            fig = px.bar(melted, x=x_ax, y="Count", color="Habit", barmode="group")
-        elif c_type == "Line":
-            fig = px.line(melted, x=x_ax, y="Count", color="Habit", markers=True)
-        else:
-            fig = px.pie(melted, values="Count", names="Habit")
-            
+    # 2. HEATMAP
+    if habit_keys:
+        df["Total_Score"] = df[habit_keys].sum(axis=1)
+        heat_data = df.copy()
+        heat_data["Day"] = pd.to_datetime(heat_data["Date"]).dt.day_name()
+        fig = px.density_heatmap(heat_data, x="Week", y="Day", z="Total_Score", nbinsx=52, color_continuous_scale="Greens")
         st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("📂 View Detailed Journal"):
+    with st.expander("History"):
         st.dataframe(df.sort_values("Date", ascending=False))
-else:
-    st.info("👈 Click 'Start Daily Log' in the sidebar!")
