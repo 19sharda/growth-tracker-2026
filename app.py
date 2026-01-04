@@ -13,13 +13,20 @@ GIF_HIGH = "https://gifdb.com/images/high/weight-lifting-machio-naruzo-muscles-b
 GIF_MID = "https://gifdb.com/images/high/weight-lifting-one-piece-zoro-dumbbell-9fijwjssrinfxgsf.gif"
 GIF_LOW = "https://gifdb.com/images/high/weight-lifting-nijigasaki-kasumi-nakasu-i8k4v57vhfxyaqur.gif"
 
+# --- FULL YEAR ROADMAP ---
 AI_ROADMAP = {
-    1: "Jan: Python Basics & OOP", 2: "Feb: Automation Framework",
-    3: "Mar: API Testing & Reporting", 4: "Apr: LangChain & RAG",
-    5: "May: RAG Project", 6: "Jun: LLM Evaluation",
-    7: "Jul: AI Testing Framework", 8: "Aug: Dataset Creation",
-    9: "Sep: Fine-tuning Basics", 10: "Oct: AI Agents",
-    11: "Nov: Optimization", 12: "Dec: Capstone Project"
+    1: {"topic": "Python Basics & OOP", "link": "https://www.learnpython.org/"},
+    2: {"topic": "Automation Framework", "link": "https://testautomationuniversity.applitools.com/"},
+    3: {"topic": "API Testing & Reporting", "link": "https://www.postman.com/api-platform/api-testing/"},
+    4: {"topic": "LangChain & RAG", "link": "https://python.langchain.com/docs/get_started/introduction"},
+    5: {"topic": "RAG Project", "link": "https://www.youtube.com/results?search_query=rag+project+python"},
+    6: {"topic": "LLM Evaluation", "link": "https://docs.smith.langchain.com/"},
+    7: {"topic": "AI Testing Framework", "link": "https://github.com/microsoft/promptflow"},
+    8: {"topic": "Dataset Creation", "link": "https://huggingface.co/docs/datasets/index"},
+    9: {"topic": "Fine-tuning Basics", "link": "https://www.philschmid.de/fine-tune-llms-in-2024-with-trl"},
+    10: {"topic": "AI Agents", "link": "https://www.deeplearning.ai/short-courses/ai-agents-in-langchain/"},
+    11: {"topic": "Optimization", "link": "https://huggingface.co/docs/optimum/index"},
+    12: {"topic": "Capstone Project", "link": "https://github.com/"}
 }
 
 QUESTIONS = [
@@ -37,7 +44,18 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def get_data():
     try:
         conn.reset()
-        return conn.read(worksheet="Logs", usecols=list(range(14)), ttl=0)
+        # Fetch 15 columns (Date + 12 Habit Cols + Next_Goal + Reflection)
+        return conn.read(worksheet="Logs", usecols=list(range(15)), ttl=0)
+    except:
+        return pd.DataFrame()
+
+# --- GET SCHEDULE ---
+def get_schedule():
+    try:
+        df_schedule = conn.read(worksheet="Schedule", usecols=[0, 1], ttl=0)
+        df_schedule.columns = ["Date", "Task"]
+        df_schedule["Date"] = pd.to_datetime(df_schedule["Date"]).dt.date
+        return df_schedule
     except:
         return pd.DataFrame()
 
@@ -47,8 +65,7 @@ def update_data(df):
 # --- HELPER: SAVE LOGIC ---
 def save_partial_log(date_obj, key, val, detail):
     df = get_data()
-    if not df.empty:
-        df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    if not df.empty: df["Date"] = pd.to_datetime(df["Date"]).dt.date
     
     if not df.empty and date_obj in df["Date"].values:
         mask = df["Date"] == date_obj
@@ -61,6 +78,7 @@ def save_partial_log(date_obj, key, val, detail):
             new_row[q["key"]] = 0
             new_row[f"{q['key']}_Detail"] = ""
         new_row["Next_Goal"] = ""
+        new_row["Reflection"] = ""
         new_row[key] = val
         new_row[f"{key}_Detail"] = detail
         new_df = pd.DataFrame([new_row])
@@ -68,7 +86,6 @@ def save_partial_log(date_obj, key, val, detail):
     
     update_data(final_df)
     
-    # Perfection Check
     today_row = final_df[final_df["Date"] == date_obj].iloc[0]
     total_done = sum([1 for q in QUESTIONS if today_row.get(q["key"], 0) == 1])
     
@@ -80,51 +97,82 @@ def save_partial_log(date_obj, key, val, detail):
     time.sleep(1)
     st.rerun()
 
-def save_goal(date_obj, goal_text):
+def save_generic_text(date_obj, col_name, text):
     df = get_data()
     if not df.empty: df["Date"] = pd.to_datetime(df["Date"]).dt.date
     
     if not df.empty and date_obj in df["Date"].values:
-        df.loc[df["Date"] == date_obj, "Next_Goal"] = goal_text
+        df.loc[df["Date"] == date_obj, col_name] = text
         final_df = df
     else:
-        new_row = {"Date": date_obj, "Next_Goal": goal_text}
+        new_row = {"Date": date_obj, col_name: text}
         for q in QUESTIONS: new_row[q["key"]] = 0
         final_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         
     update_data(final_df)
-    st.toast("Goal Committed!", icon="🔮")
+    st.toast("Saved!", icon="💾")
     time.sleep(1)
     st.rerun()
 
 # --- APP START ---
-st.title("🚀 2026 Growth Dashboard")
-current_month = date.today().month
-st.markdown(f"### 🎯 Focus: **{AI_ROADMAP.get(current_month, 'Growth')}**")
-
-# --- LOAD DATA ---
-try:
-    df = get_data()
-    if not df.empty:
-        df["Date"] = pd.to_datetime(df["Date"]).dt.date
-        habit_cols = [q["key"] for q in QUESTIONS]
-        def clean_bool(val):
-            try: return 1 if float(val) > 0 else 0
-            except: return 1 if str(val).upper() in ["TRUE", "T", "YES", "ON"] else 0
-        for col in habit_cols:
-            if col in df.columns:
-                df[col] = df[col].fillna(0).apply(clean_bool)
-except:
-    st.error("DB Connection Error")
-    st.stop()
-
 today = date.today()
+current_month = today.month
+
+# STREAK CALCULATION
+df = get_data()
+streak = 0
+if not df.empty:
+    df["Date"] = pd.to_datetime(df["Date"]).dt.date
+    df = df.sort_values("Date", ascending=False)
+    habit_keys = [q["key"] for q in QUESTIONS if q["key"] in df.columns]
+    df["Any_Done"] = df[habit_keys].sum(axis=1) > 0
+    active_dates = df[df["Any_Done"]]["Date"].unique()
+    check_date = today
+    if check_date not in active_dates: check_date = today - timedelta(days=1)
+    while check_date in active_dates:
+        streak += 1
+        check_date -= timedelta(days=1)
+
+# HEADER
+c_title, c_streak = st.columns([3, 1])
+with c_title:
+    st.title("🚀 2026 Growth Tracker")
+with c_streak:
+    st.metric("Current Streak", f"🔥 {streak} Days")
+
+# --- 🧠 SMART MENTOR & ROADMAP (UPDATED) ---
+schedule_df = get_schedule()
+todays_task = "No specific task assigned."
+task_found = False
+
+if not schedule_df.empty:
+    task_row = schedule_df[schedule_df["Date"] == today]
+    if not task_row.empty:
+        todays_task = task_row.iloc[0]["Task"]
+        task_found = True
+
+if task_found:
+    st.info(f"📅 **TODAY'S MISSION:** {todays_task}")
+
+# EXPANDABLE ROADMAP
+with st.expander("🗺️ View Full AI Roadmap (Click to Expand)"):
+    st.markdown("### 📅 Yearly Plan")
+    for m in range(1, 13):
+        data = AI_ROADMAP.get(m, {"topic": "TBD", "link": "#"})
+        prefix = "👉" if m == current_month else "🔹"
+        style = "**" if m == current_month else ""
+        st.markdown(f"{prefix} {style}Month {m}: [{data['topic']}]({data['link']}){style}")
 
 # --- TOP STATS & GIF ---
 today_progress = 0
+today_reflection = ""
 if not df.empty and today in df["Date"].values:
     row = df[df["Date"] == today].iloc[0]
+    def clean_bool(val):
+        try: return 1 if float(val) > 0 else 0
+        except: return 1 if str(val).upper() in ["TRUE", "T", "YES", "ON"] else 0
     today_progress = sum([1 for q in QUESTIONS if clean_bool(row.get(q["key"], 0)) == 1])
+    today_reflection = row.get("Reflection", "") if pd.notna(row.get("Reflection", "")) else ""
 
 if today_progress >= 4:
     current_gif = GIF_HIGH
@@ -139,7 +187,8 @@ else:
 c1, c2 = st.columns([1, 4])
 with c1: st.image(current_gif, use_container_width=True)
 with c2:
-    st.info(status_msg)
+    st.success(status_msg)
+    cg1, cg2 = st.columns(2)
     today_goal_msg = "No goal set."
     if not df.empty:
         yest = today - timedelta(days=1)
@@ -147,10 +196,18 @@ with c2:
         if not y_row.empty and "Next_Goal" in y_row.columns:
             g = y_row.iloc[0]["Next_Goal"]
             if pd.notna(g) and str(g).strip(): today_goal_msg = f"🔮 **Target:** {g}"
-    st.write(today_goal_msg)
-    with st.popover("Set Tomorrow's Goal"):
-        new_g = st.text_input("One Goal:")
-        if st.button("Commit"): save_goal(today, new_g)
+    
+    with cg1:
+        st.write(today_goal_msg)
+        with st.popover("Set Tomorrow's Goal"):
+            new_g = st.text_input("One Goal:")
+            if st.button("Commit Goal"): save_generic_text(today, "Next_Goal", new_g)
+    with cg2:
+        if today_reflection: st.caption(f"📝 {today_reflection}")
+        else: st.caption("📝 No reflection yet.")
+        with st.popover("Add Note"):
+            new_r = st.text_area("Note:", value=today_reflection)
+            if st.button("Save Note"): save_generic_text(today, "Reflection", new_r)
 
 st.divider()
 
@@ -170,8 +227,14 @@ for idx, q in enumerate(QUESTIONS):
     key = q["key"]
     stat = today_data.get(key, {"done": False, "detail": ""})
     icon = "✅" if stat["done"] else "⬜"
+    
     with cols[idx]:
         with st.expander(f"{icon} {key}", expanded=not stat["done"]):
+            if key == "Code" and task_found:
+                st.info(f"🎯 **Target:** {todays_task}")
+                if not stat["detail"]:
+                    stat["detail"] = f"Studied: {todays_task}"
+            
             st.caption(q["q"])
             with st.form(f"f_{key}"):
                 chk = st.checkbox("Done?", value=stat["done"])
@@ -184,55 +247,48 @@ for idx, q in enumerate(QUESTIONS):
 if not df.empty:
     st.divider()
     st.subheader("📊 Performance & Rewards")
-    
-    # 1. METRICS ROW
     m1, m2, m3, m4 = st.columns(4)
     this_month = df[pd.to_datetime(df["Date"]).dt.month == current_month]
     
-    # WEEKLY JACKPOT LOGIC
-    # Get current week data (Mon-Sat only)
     curr_week_num = today.isocalendar().week
     df["Week"] = pd.to_datetime(df["Date"]).dt.isocalendar().week
-    df["DayOfWeek"] = pd.to_datetime(df["Date"]).dt.dayofweek # 0=Mon, 6=Sun
-    
+    df["DayOfWeek"] = pd.to_datetime(df["Date"]).dt.dayofweek 
     this_week_df = df[(df["Week"] == curr_week_num) & (df["DayOfWeek"] != 6)]
     
-    # Calculate Weekly Score
     habit_keys = [q["key"] for q in QUESTIONS]
     tasks_done = this_week_df[habit_keys].sum().sum()
-    
-    # Total possible so far this week (Dynamic: Today's day index + 1 * 6 habits)
-    # Or Fixed: Total possible for a FULL week is 36
-    # Let's use FIXED 36 to show progress towards the weekly goal
     total_possible_week = 36 
-    
     weekly_pct = 0
-    if total_possible_week > 0:
-        weekly_pct = int((tasks_done / total_possible_week) * 100)
+    if total_possible_week > 0: weekly_pct = int((tasks_done / total_possible_week) * 100)
     
+    today_idx = today.weekday()
+    if today_idx == 6: days_left_msg = "Week Over"
+    else:
+        days_left = 5 - today_idx
+        days_left_msg = f"⏳ {days_left} Days Left" if days_left > 0 else "🔥 Last Day!"
+
     reward_points = 0
-    reward_status = "❌ Locked"
     if weekly_pct > 50:
-        reward_points = int(weekly_pct) * 50
+        reward_points = int(weekly_pct) * 5
         reward_status = "🔓 UNLOCKED!"
+        delta_color = "normal"
+    else:
+        reward_status = "❌ Locked"
+        delta_color = "off"
     
     m1.metric("Weekly Progress", f"{weekly_pct}%", f"{tasks_done}/36 Tasks")
-    m2.metric("Weekly Jackpot", f"{reward_points} Pts", reward_status)
+    m2.metric("Weekly Jackpot", f"{reward_points} Pts", f"{reward_status} | {days_left_msg}", delta_color=delta_color)
     
-    # LIFETIME POINTS (Simple accumulation for fun)
     total_habits_all_time = df[habit_keys].sum().sum()
     lifetime_score = int(total_habits_all_time * 10) + (reward_points if weekly_pct > 50 else 0)
     m3.metric("Lifetime Score", f"{lifetime_score}", "XP")
     
-    # Discipline Score (Mon-Sat)
     work_days = this_month[pd.to_datetime(this_month["Date"]).dt.dayofweek != 6]
     if len(work_days) > 0:
         d_score = int((work_days[habit_keys].sum().sum() / (len(work_days) * 6)) * 100)
         m4.metric("Discipline (Mon-Sat)", f"{d_score}%")
-    else:
-        m4.metric("Discipline", "0%")
+    else: m4.metric("Discipline", "0%")
 
-    # 2. HEATMAP
     if habit_keys:
         df["Total_Score"] = df[habit_keys].sum(axis=1)
         heat_data = df.copy()
@@ -240,5 +296,10 @@ if not df.empty:
         fig = px.density_heatmap(heat_data, x="Week", y="Day", z="Total_Score", nbinsx=52, color_continuous_scale="Greens")
         st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("History"):
-        st.dataframe(df.sort_values("Date", ascending=False))
+    # --- UPDATED: SECURE HISTORY SECTION ---
+    with st.expander("🔐 View History (PIN Required)"):
+        pin = st.text_input("Enter PIN:", type="password", key="history_pin")
+        if pin == "1234":
+            st.dataframe(df.sort_values("Date", ascending=False))
+        elif pin:
+            st.error("🔒 Incorrect PIN")
