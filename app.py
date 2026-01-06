@@ -13,7 +13,6 @@ GIF_HIGH = "https://gifdb.com/images/high/weight-lifting-machio-naruzo-muscles-b
 GIF_MID = "https://gifdb.com/images/high/weight-lifting-one-piece-zoro-dumbbell-9fijwjssrinfxgsf.gif"
 GIF_LOW = "https://gifdb.com/images/high/weight-lifting-nijigasaki-kasumi-nakasu-i8k4v57vhfxyaqur.gif"
 
-# --- FULL YEAR ROADMAP ---
 AI_ROADMAP = {
     1: {"topic": "Python Basics & OOP", "link": "https://www.learnpython.org/"},
     2: {"topic": "Automation Framework", "link": "https://testautomationuniversity.applitools.com/"},
@@ -38,24 +37,23 @@ QUESTIONS = [
     {"key": "SideHustle", "icon": "🎥", "color": "violet", "q": "SIDE HUSTLE work?", "ask_detail": "Progress?"}
 ]
 
-# --- TIMEZONE FIX: IST CALCULATOR ---
+# --- IST TIMEZONE CALCULATOR ---
 def get_ist_date():
-    # UTC + 5:30
     utc_now = datetime.utcnow()
     ist_now = utc_now + timedelta(hours=5, minutes=30)
     return ist_now.date()
 
-# --- CONNECT TO DB ---
+# --- DATABASE CONNECTION ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
         conn.reset()
-        return conn.read(worksheet="Logs", usecols=list(range(15)), ttl=0)
+        # Fetch 16 columns (A-P)
+        return conn.read(worksheet="Logs", usecols=list(range(16)), ttl=0)
     except:
         return pd.DataFrame()
 
-# --- GET SCHEDULE ---
 def get_schedule():
     try:
         df_schedule = conn.read(worksheet="Schedule", usecols=[0, 1], ttl=0)
@@ -68,7 +66,7 @@ def get_schedule():
 def update_data(df):
     conn.update(worksheet="Logs", data=df)
 
-# --- HELPER: SAVE LOGIC ---
+# --- SAVE LOGIC ---
 def save_partial_log(date_obj, key, val, detail):
     df = get_data()
     if not df.empty: df["Date"] = pd.to_datetime(df["Date"]).dt.date
@@ -85,6 +83,7 @@ def save_partial_log(date_obj, key, val, detail):
             new_row[f"{q['key']}_Detail"] = ""
         new_row["Next_Goal"] = ""
         new_row["Reflection"] = ""
+        new_row["Weekly_Retro"] = ""
         new_row[key] = val
         new_row[f"{key}_Detail"] = detail
         new_df = pd.DataFrame([new_row])
@@ -121,12 +120,11 @@ def save_generic_text(date_obj, col_name, text):
     st.rerun()
 
 # --- APP START ---
-# 🔥 CRITICAL: Use IST Date instead of Server Date
 today = get_ist_date()
 current_month = today.month
-
-# STREAK CALCULATION
 df = get_data()
+
+# 1. CALCULATE STREAK
 streak = 0
 if not df.empty:
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
@@ -140,27 +138,25 @@ if not df.empty:
         streak += 1
         check_date -= timedelta(days=1)
 
-# HEADER
+# 2. HEADER
 c_title, c_streak = st.columns([3, 1])
 with c_title:
     st.title("🚀 2026 Growth Tracker")
-    st.caption(f"📅 Today is {today.strftime('%A, %d %b')} (IST)")
+    st.caption(f"📅 {today.strftime('%A, %d %B %Y')} (IST)")
 with c_streak:
     st.metric("Current Streak", f"🔥 {streak} Days")
 
-# --- 🧠 SMART MENTOR & ROADMAP ---
+# 3. SMART MENTOR
 schedule_df = get_schedule()
 todays_task = "No specific task assigned."
 task_found = False
-
 if not schedule_df.empty:
     task_row = schedule_df[schedule_df["Date"] == today]
     if not task_row.empty:
         todays_task = task_row.iloc[0]["Task"]
         task_found = True
 
-if task_found:
-    st.info(f"📅 **TODAY'S MISSION:** {todays_task}")
+if task_found: st.info(f"📅 **TODAY'S MISSION:** {todays_task}")
 
 with st.expander("🗺️ View Full AI Roadmap (Click to Expand)"):
     st.markdown("### 📅 Yearly Plan")
@@ -170,7 +166,7 @@ with st.expander("🗺️ View Full AI Roadmap (Click to Expand)"):
         style = "**" if m == current_month else ""
         st.markdown(f"{prefix} {style}Month {m}: [{data['topic']}]({data['link']}){style}")
 
-# --- TOP STATS & GIF ---
+# 4. STATUS & GIF
 today_progress = 0
 today_reflection = ""
 if not df.empty and today in df["Date"].values:
@@ -218,7 +214,7 @@ with c2:
 
 st.divider()
 
-# --- CONTROL CENTER ---
+# 5. CONTROL CENTER
 st.subheader("📝 Daily Control Center")
 today_data = {}
 if not df.empty and today in df["Date"].values:
@@ -234,13 +230,11 @@ for idx, q in enumerate(QUESTIONS):
     key = q["key"]
     stat = today_data.get(key, {"done": False, "detail": ""})
     icon = "✅" if stat["done"] else "⬜"
-    
     with cols[idx]:
         with st.expander(f"{icon} {key}", expanded=not stat["done"]):
             if key == "Code" and task_found:
                 st.info(f"🎯 **Target:** {todays_task}")
-                if not stat["detail"]:
-                    stat["detail"] = f"Studied: {todays_task}"
+                if not stat["detail"]: stat["detail"] = f"Studied: {todays_task}"
             
             st.caption(q["q"])
             with st.form(f"f_{key}"):
@@ -250,14 +244,11 @@ for idx, q in enumerate(QUESTIONS):
                     if chk and not det.strip(): st.error("Detail needed!")
                     else: save_partial_log(today, key, 1 if chk else 0, det)
 
-# --- ANALYTICS ---
+# 6. ANALYTICS
 if not df.empty:
     st.divider()
     st.subheader("📊 Performance & Rewards")
-    m1, m2, m3, m4 = st.columns(4)
-    this_month = df[pd.to_datetime(df["Date"]).dt.month == current_month]
     
-    # 1. PREP DATA
     df["Date_Obj"] = pd.to_datetime(df["Date"])
     df["Week_Num"] = df["Date_Obj"].dt.isocalendar().week
     df["Year"] = df["Date_Obj"].dt.isocalendar().year
@@ -265,17 +256,15 @@ if not df.empty:
     daily_habits = ["Workout", "Code", "Read", "NoJunk", "SideHustle"]
     weekly_habit = "Connect"
     
-    # 2. CURRENT WEEK STATUS (INCLUDES SUNDAYS)
+    # --- CURRENT WEEK CALCS ---
     curr_week = today.isocalendar().week
     curr_year = today.isocalendar().year
-    
     this_week_df = df[(df["Week_Num"] == curr_week) & (df["Year"] == curr_year)]
     
     cur_daily = this_week_df[daily_habits].sum().sum()
     cur_connect = 1 if this_week_df[weekly_habit].sum() >= 1 else 0
     cur_total = cur_daily + cur_connect
-    cur_possible = 31 # Fixed Target (6-Day Goal, but Sunday counts as bonus)
-    
+    cur_possible = 31
     cur_pct = 0
     if cur_possible > 0: cur_pct = int((cur_total / cur_possible) * 100)
     
@@ -287,12 +276,18 @@ if not df.empty:
     else:
         reward_status = "❌ Locked"
         delta_color = "off"
-
+    
     today_idx = today.weekday()
     if today_idx == 6: days_msg = "Week Over"
     else: days_msg = f"⏳ {5 - today_idx} Days Left"
 
-    # 3. HISTORICAL JACKPOT
+    # --- WEAKEST LINK CALCULATION (MISSED MOST) ---
+    habit_counts = this_week_df[daily_habits].sum().sort_values()
+    # Get top 2 missed (lowest count)
+    missed_habits = habit_counts.head(2).index.tolist()
+    missed_msg = ", ".join(missed_habits) if missed_habits else "None! (Great Job)"
+
+    # --- HISTORICAL CALCS ---
     history_groups = df.groupby(["Year", "Week_Num"])
     total_historical_jackpot = 0
     history_log = [] 
@@ -302,6 +297,11 @@ if not df.empty:
         h_connect = 1 if group[weekly_habit].sum() >= 1 else 0
         h_total = h_daily + h_connect
         h_pct = int((h_total / 31) * 100)
+        
+        retro_note = ""
+        if "Weekly_Retro" in group.columns:
+            retro_list = group[group["Weekly_Retro"].notna() & (group["Weekly_Retro"] != "")]["Weekly_Retro"].tolist()
+            if retro_list: retro_note = retro_list[-1]
         
         pts = 0
         status = "❌ Missed"
@@ -315,28 +315,29 @@ if not df.empty:
             "Tasks Done": int(h_total),
             "Completion": f"{h_pct}%",
             "Points": pts,
-            "Status": status
+            "Status": status,
+            "Retrospective": retro_note
         })
 
     raw_xp = df[daily_habits + [weekly_habit]].sum().sum() * 10
     final_lifetime_score = raw_xp + total_historical_jackpot
-    
-    # 4. METRICS
+    d_score = 0
+    if len(this_week_df) > 0:
+        total_daily_slots = len(this_week_df) * 5
+        if total_daily_slots > 0: d_score = int((cur_daily / total_daily_slots) * 100)
+
+    # METRICS
+    m1, m2 = st.columns(2)
+    m3, m4 = st.columns(2)
     m1.metric("Weekly Progress", f"{cur_pct}%", f"{int(cur_total)}/31 Tasks")
     m2.metric("Weekly Jackpot", f"{cur_reward} Pts", f"{reward_status} | {days_msg}", delta_color=delta_color)
     m3.metric("Lifetime Score", f"{final_lifetime_score}", "XP")
-    
-    # Discipline Score (Mon-Sat approx)
-    if len(this_week_df) > 0:
-        d_score = cur_pct
-        m4.metric("Discipline Score", f"{d_score}%")
-    else: m4.metric("Discipline Score", "0%")
+    m4.metric("Daily Consistency", f"{d_score}%", "Excl. Connect")
 
-    # --- GRAPH SECTION ---
+    # --- TABS ---
     st.divider()
     st.subheader("📈 Trends & Consistency")
-    
-    tab1, tab2, tab3 = st.tabs(["📊 Charts", "🔥 Heatmap", "🏆 Jackpot Ledger"])
+    tab1, tab2, tab3 = st.tabs(["📊 Charts", "🔥 Heatmap", "🏆 Jackpot & Review"])
     
     plot_df = df.copy()
     all_keys = daily_habits + [weekly_habit]
@@ -367,10 +368,62 @@ if not df.empty:
         st.plotly_chart(fig_heat, use_container_width=True)
         
     with tab3:
-        st.caption("This ledger tracks your weekly performance.")
+        # --- WEEKLY REVIEW CARD ---
+        is_sunday = today.weekday() == 6
+        
+        # Determine Card Title & State
+        retro_title = "📝 Weekly Review (Unlock on Sunday)"
+        if is_sunday: retro_title = "📝 Weekly Review (Open Now!)"
+        
+        with st.expander(retro_title, expanded=is_sunday):
+            if is_sunday:
+                st.markdown(f"**Reviewing Week {curr_week}** (Progress: {cur_pct}%)")
+                
+                # SHOW MISSED HABITS
+                st.warning(f"⚠️ **Focus Area:** You missed **{missed_msg}** most this week.")
+                
+                st.caption("Be honest. This is for Future You.")
+                
+                with st.form("weekly_retro_form"):
+                    q1 = st.text_input("1. 🏆 Big Win:", placeholder="e.g. Hit all workouts")
+                    q2 = st.text_input("2. 📉 Big Miss:", placeholder="e.g. Procrastinated coding")
+                    q3 = st.text_input("3. 🧐 Why it happened?", placeholder="e.g. Stayed up too late")
+                    q4 = st.text_input("4. 🛠️ The Fix:", placeholder="e.g. Phone off at 10pm")
+                    q5 = st.slider("5. 🔥 Commitment for Next Week?", 1, 10, 8)
+                    
+                    if st.form_submit_button("Save Weekly Review"):
+                        full_review = f"{q1}|{q2}|{q3}|{q4}|{q5}"
+                        save_generic_text(today, "Weekly_Retro", full_review)
+            else:
+                st.info("🔒 This form is locked until Sunday. Focus on your daily tasks for now!")
+        
+        st.divider()
+        st.markdown("### 📜 Past Reviews & Ledger")
+        st.metric("Total Career Earnings", f"{total_historical_jackpot} Pts")
+        
         if history_log:
-            hist_df = pd.DataFrame(history_log).sort_values("Week", ascending=False)
-            st.dataframe(hist_df, use_container_width=True)
+            history_log.sort(key=lambda x: x['Week'], reverse=True)
+            for entry in history_log:
+                with st.container():
+                    c_head, c_pts = st.columns([3, 1])
+                    c_head.markdown(f"#### **{entry['Week']}** - {entry['Status']}")
+                    c_pts.metric("Pts", entry['Points'])
+                    
+                    raw_retro = entry['Retrospective']
+                    if raw_retro and "|" in raw_retro:
+                        parts = raw_retro.split("|")
+                        if len(parts) >= 4:
+                            st.markdown(f"""
+                            - 🏆 **Win:** {parts[0]}
+                            - 📉 **Miss:** {parts[1]}
+                            - 🧐 **Why:** {parts[2]}
+                            - 🛠️ **Fix:** {parts[3]}
+                            - 🔥 **Commitment:** {parts[4]}/10
+                            """)
+                        else: st.text(f"📝 Note: {raw_retro}")
+                    elif raw_retro: st.text(f"📝 Note: {raw_retro}")
+                    else: st.caption("No review submitted.")
+                    st.divider()
         else:
             st.info("No history yet.")
 
