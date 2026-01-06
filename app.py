@@ -140,7 +140,7 @@ with c_title:
 with c_streak:
     st.metric("Current Streak", f"🔥 {streak} Days")
 
-# --- 🧠 SMART MENTOR & ROADMAP ---
+# --- 🧠 SMART MENTOR ---
 schedule_df = get_schedule()
 todays_task = "No specific task assigned."
 task_found = False
@@ -249,104 +249,125 @@ if not df.empty:
     m1, m2, m3, m4 = st.columns(4)
     this_month = df[pd.to_datetime(df["Date"]).dt.month == current_month]
     
-    # --- UPDATED: WEEKLY CALCULATION (Connect 1/Week Logic) ---
-    curr_week_num = today.isocalendar().week
-    df["Week"] = pd.to_datetime(df["Date"]).dt.isocalendar().week
-    df["DayOfWeek"] = pd.to_datetime(df["Date"]).dt.dayofweek 
-    this_week_df = df[(df["Week"] == curr_week_num) & (df["DayOfWeek"] != 6)]
+    # 1. PREP DATA FOR CALCS
+    df["Date_Obj"] = pd.to_datetime(df["Date"])
+    df["Week_Num"] = df["Date_Obj"].dt.isocalendar().week
+    df["Year"] = df["Date_Obj"].dt.isocalendar().year
+    df["DayOfWeek"] = df["Date_Obj"].dt.dayofweek 
     
-    # Define Habits
     daily_habits = ["Workout", "Code", "Read", "NoJunk", "SideHustle"]
     weekly_habit = "Connect"
     
-    # 1. Sum Daily Habits (Max 30 tasks: 5 habits * 6 days)
-    daily_done = this_week_df[daily_habits].sum().sum()
+    # 2. CURRENT WEEK STATUS
+    curr_week = today.isocalendar().week
+    curr_year = today.isocalendar().year
     
-    # 2. Sum Connect (Capped at 1 for the week)
-    connect_raw = this_week_df[weekly_habit].sum()
-    connect_credit = 1 if connect_raw >= 1 else 0
+    this_week_df = df[(df["Week_Num"] == curr_week) & (df["Year"] == curr_year) & (df["DayOfWeek"] != 6)]
     
-    # 3. Total Tasks Done
-    tasks_done = daily_done + connect_credit
+    cur_daily = this_week_df[daily_habits].sum().sum()
+    cur_connect = 1 if this_week_df[weekly_habit].sum() >= 1 else 0
+    cur_total = cur_daily + cur_connect
+    cur_possible = 31
     
-    # 4. Total Possible (Fixed Goal: 31 Tasks)
-    total_possible_week = 31 
+    cur_pct = 0
+    if cur_possible > 0: cur_pct = int((cur_total / cur_possible) * 100)
     
-    weekly_pct = 0
-    if total_possible_week > 0: 
-        weekly_pct = int((tasks_done / total_possible_week) * 100)
-    
-    # Days Left Logic
-    today_idx = today.weekday()
-    if today_idx == 6: days_left_msg = "Week Over"
-    else:
-        days_left = 5 - today_idx
-        days_left_msg = f"⏳ {days_left} Days Left" if days_left > 0 else "🔥 Last Day!"
-
-    reward_points = 0
-    if weekly_pct > 50:
-        reward_points = int(weekly_pct) * 5
+    cur_reward = 0
+    if cur_pct > 50:
+        cur_reward = int(cur_pct) * 5
         reward_status = "🔓 UNLOCKED!"
         delta_color = "normal"
     else:
         reward_status = "❌ Locked"
         delta_color = "off"
+
+    today_idx = today.weekday()
+    if today_idx == 6: days_msg = "Week Over"
+    else: days_msg = f"⏳ {5 - today_idx} Days Left"
+
+    # 3. HISTORICAL JACKPOT CALCULATION
+    history_groups = df[df["DayOfWeek"] != 6].groupby(["Year", "Week_Num"])
+    total_historical_jackpot = 0
+    history_log = [] # To store list of wins
     
-    m1.metric("Weekly Progress", f"{weekly_pct}%", f"{int(tasks_done)}/31 Tasks")
-    m2.metric("Weekly Jackpot", f"{reward_points} Pts", f"{reward_status} | {days_left_msg}", delta_color=delta_color)
+    for (h_year, h_week), group in history_groups:
+        h_daily = group[daily_habits].sum().sum()
+        h_connect = 1 if group[weekly_habit].sum() >= 1 else 0
+        h_total = h_daily + h_connect
+        h_pct = int((h_total / 31) * 100)
+        
+        pts = 0
+        status = "❌ Missed"
+        if h_pct > 50:
+            pts = h_pct * 5
+            total_historical_jackpot += pts
+            status = "🏆 WON"
+            
+        history_log.append({
+            "Week": f"{h_year}-W{h_week}",
+            "Tasks Done": h_total,
+            "Completion": f"{h_pct}%",
+            "Points": pts,
+            "Status": status
+        })
+
+    raw_xp = df[daily_habits + [weekly_habit]].sum().sum() * 10
+    final_lifetime_score = raw_xp + total_historical_jackpot
     
-    # Lifetime score (approximate)
-    all_keys = daily_habits + [weekly_habit]
-    total_habits_all_time = df[all_keys].sum().sum()
-    lifetime_score = int(total_habits_all_time * 10) + (reward_points if weekly_pct > 50 else 0)
-    m3.metric("Lifetime Score", f"{lifetime_score}", "XP")
+    # 4. METRICS
+    m1.metric("Weekly Progress", f"{cur_pct}%", f"{int(cur_total)}/31 Tasks")
+    m2.metric("Weekly Jackpot", f"{cur_reward} Pts", f"{reward_status} | {days_msg}", delta_color=delta_color)
+    m3.metric("Lifetime Score", f"{final_lifetime_score}", "XP (Includes History)")
     
-    # Discipline Score (Mon-Sat, exclude Connect from daily pressure)
-    work_days = this_month[pd.to_datetime(this_month["Date"]).dt.dayofweek != 6]
+    work_days = this_month[df["Date_Obj"].dt.dayofweek != 6]
     if len(work_days) > 0:
         d_score = int((work_days[daily_habits].sum().sum() / (len(work_days) * 5)) * 100)
         m4.metric("Discipline (Mon-Sat)", f"{d_score}%")
     else: m4.metric("Discipline", "0%")
 
-    # --- GRAPH SECTION ---
+    # --- TABS FOR VISUALS ---
     st.divider()
     st.subheader("📈 Trends & Consistency")
     
-    chart_tab, heatmap_tab = st.tabs(["📊 Data Visualizer", "🔥 Yearly Grid"])
+    tab1, tab2, tab3 = st.tabs(["📊 Charts", "🔥 Heatmap", "🏆 Jackpot Ledger"])
     
     plot_df = df.copy()
-    if all_keys:
-        plot_df["Total_Score"] = plot_df[all_keys].sum(axis=1)
+    all_keys = daily_habits + [weekly_habit]
+    if all_keys: plot_df["Total_Score"] = plot_df[all_keys].sum(axis=1)
 
-    with chart_tab:
-        view_mode = st.radio("Select View:", ["Daily Trend", "Weekly Progress", "Monthly Summary"], horizontal=True)
-        
+    with tab1:
+        view_mode = st.radio("View:", ["Daily Trend", "Weekly Progress", "Monthly Summary"], horizontal=True)
         if view_mode == "Daily Trend":
-            fig_chart = px.bar(plot_df, x="Date", y="Total_Score", title="Daily Habits Completed", color="Total_Score", color_continuous_scale="Blues")
+            fig_chart = px.bar(plot_df, x="Date", y="Total_Score", color="Total_Score", color_continuous_scale="Blues")
         elif view_mode == "Weekly Progress":
-            plot_df["Week_Num"] = pd.to_datetime(plot_df["Date"]).dt.isocalendar().week
             weekly_df = plot_df.groupby("Week_Num")["Total_Score"].sum().reset_index()
-            fig_chart = px.bar(weekly_df, x="Week_Num", y="Total_Score", title="Total Habits per Week", color="Total_Score", color_continuous_scale="Greens", text="Total_Score")
+            fig_chart = px.bar(weekly_df, x="Week_Num", y="Total_Score", color="Total_Score", color_continuous_scale="Greens", text="Total_Score")
         elif view_mode == "Monthly Summary":
-            plot_df["Month_Name"] = pd.to_datetime(plot_df["Date"]).dt.month_name()
-            plot_df["Month_Idx"] = pd.to_datetime(plot_df["Date"]).dt.month
+            plot_df["Month_Name"] = plot_df["Date_Obj"].dt.month_name()
+            plot_df["Month_Idx"] = plot_df["Date_Obj"].dt.month
             monthly_df = plot_df.groupby(["Month_Name", "Month_Idx"])["Total_Score"].sum().reset_index().sort_values("Month_Idx")
-            fig_chart = px.bar(monthly_df, x="Month_Name", y="Total_Score", title="Total Habits per Month", color="Total_Score", color_continuous_scale="Reds", text="Total_Score")
-            
+            fig_chart = px.bar(monthly_df, x="Month_Name", y="Total_Score", color="Total_Score", color_continuous_scale="Reds", text="Total_Score")
         st.plotly_chart(fig_chart, use_container_width=True)
 
-    with heatmap_tab:
+    with tab2:
         heat_data = plot_df.copy()
-        heat_data["Day"] = pd.to_datetime(heat_data["Date"]).dt.day_name()
+        heat_data["Day"] = heat_data["Date_Obj"].dt.day_name()
         fig_heat = px.density_heatmap(
-            heat_data, x="Week", y="Day", z="Total_Score", nbinsx=52, 
+            heat_data, x="Week_Num", y="Day", z="Total_Score", nbinsx=52, 
             color_continuous_scale="Greens",
-            category_orders={"Day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]},
-            title="Consistency Heatmap"
+            category_orders={"Day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]}
         )
         st.plotly_chart(fig_heat, use_container_width=True)
+        
+    with tab3:
+        st.caption("This ledger shows every week you competed.")
+        if history_log:
+            hist_df = pd.DataFrame(history_log).sort_values("Week", ascending=False)
+            st.dataframe(hist_df, use_container_width=True)
+        else:
+            st.info("No history yet. Log your first week!")
 
-    with st.expander("🔐 View History (PIN Required)"):
+    with st.expander("🔐 View Raw Data (PIN Required)"):
         pin = st.text_input("Enter PIN:", type="password", key="history_pin")
         if pin == "1234":
             st.dataframe(df.sort_values("Date", ascending=False))
