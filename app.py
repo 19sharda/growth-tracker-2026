@@ -38,13 +38,19 @@ QUESTIONS = [
     {"key": "SideHustle", "icon": "🎥", "color": "violet", "q": "SIDE HUSTLE work?", "ask_detail": "Progress?"}
 ]
 
+# --- TIMEZONE FIX: IST CALCULATOR ---
+def get_ist_date():
+    # UTC + 5:30
+    utc_now = datetime.utcnow()
+    ist_now = utc_now + timedelta(hours=5, minutes=30)
+    return ist_now.date()
+
 # --- CONNECT TO DB ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
         conn.reset()
-        # Fetch 15 columns (Date + 12 Habit Cols + Next_Goal + Reflection)
         return conn.read(worksheet="Logs", usecols=list(range(15)), ttl=0)
     except:
         return pd.DataFrame()
@@ -115,7 +121,8 @@ def save_generic_text(date_obj, col_name, text):
     st.rerun()
 
 # --- APP START ---
-today = date.today()
+# 🔥 CRITICAL: Use IST Date instead of Server Date
+today = get_ist_date()
 current_month = today.month
 
 # STREAK CALCULATION
@@ -137,10 +144,11 @@ if not df.empty:
 c_title, c_streak = st.columns([3, 1])
 with c_title:
     st.title("🚀 2026 Growth Tracker")
+    st.caption(f"📅 Today is {today.strftime('%A, %d %b')} (IST)")
 with c_streak:
     st.metric("Current Streak", f"🔥 {streak} Days")
 
-# --- 🧠 SMART MENTOR ---
+# --- 🧠 SMART MENTOR & ROADMAP ---
 schedule_df = get_schedule()
 todays_task = "No specific task assigned."
 task_found = False
@@ -249,25 +257,24 @@ if not df.empty:
     m1, m2, m3, m4 = st.columns(4)
     this_month = df[pd.to_datetime(df["Date"]).dt.month == current_month]
     
-    # 1. PREP DATA FOR CALCS
+    # 1. PREP DATA
     df["Date_Obj"] = pd.to_datetime(df["Date"])
     df["Week_Num"] = df["Date_Obj"].dt.isocalendar().week
     df["Year"] = df["Date_Obj"].dt.isocalendar().year
-    df["DayOfWeek"] = df["Date_Obj"].dt.dayofweek 
     
     daily_habits = ["Workout", "Code", "Read", "NoJunk", "SideHustle"]
     weekly_habit = "Connect"
     
-    # 2. CURRENT WEEK STATUS
+    # 2. CURRENT WEEK STATUS (INCLUDES SUNDAYS)
     curr_week = today.isocalendar().week
     curr_year = today.isocalendar().year
     
-    this_week_df = df[(df["Week_Num"] == curr_week) & (df["Year"] == curr_year) & (df["DayOfWeek"] != 6)]
+    this_week_df = df[(df["Week_Num"] == curr_week) & (df["Year"] == curr_year)]
     
     cur_daily = this_week_df[daily_habits].sum().sum()
     cur_connect = 1 if this_week_df[weekly_habit].sum() >= 1 else 0
     cur_total = cur_daily + cur_connect
-    cur_possible = 31
+    cur_possible = 31 # Fixed Target (6-Day Goal, but Sunday counts as bonus)
     
     cur_pct = 0
     if cur_possible > 0: cur_pct = int((cur_total / cur_possible) * 100)
@@ -285,10 +292,10 @@ if not df.empty:
     if today_idx == 6: days_msg = "Week Over"
     else: days_msg = f"⏳ {5 - today_idx} Days Left"
 
-    # 3. HISTORICAL JACKPOT CALCULATION
-    history_groups = df[df["DayOfWeek"] != 6].groupby(["Year", "Week_Num"])
+    # 3. HISTORICAL JACKPOT
+    history_groups = df.groupby(["Year", "Week_Num"])
     total_historical_jackpot = 0
-    history_log = [] # To store list of wins
+    history_log = [] 
     
     for (h_year, h_week), group in history_groups:
         h_daily = group[daily_habits].sum().sum()
@@ -305,7 +312,7 @@ if not df.empty:
             
         history_log.append({
             "Week": f"{h_year}-W{h_week}",
-            "Tasks Done": h_total,
+            "Tasks Done": int(h_total),
             "Completion": f"{h_pct}%",
             "Points": pts,
             "Status": status
@@ -317,15 +324,15 @@ if not df.empty:
     # 4. METRICS
     m1.metric("Weekly Progress", f"{cur_pct}%", f"{int(cur_total)}/31 Tasks")
     m2.metric("Weekly Jackpot", f"{cur_reward} Pts", f"{reward_status} | {days_msg}", delta_color=delta_color)
-    m3.metric("Lifetime Score", f"{final_lifetime_score}", "XP (Includes History)")
+    m3.metric("Lifetime Score", f"{final_lifetime_score}", "XP")
     
-    work_days = this_month[df["Date_Obj"].dt.dayofweek != 6]
-    if len(work_days) > 0:
-        d_score = int((work_days[daily_habits].sum().sum() / (len(work_days) * 5)) * 100)
-        m4.metric("Discipline (Mon-Sat)", f"{d_score}%")
-    else: m4.metric("Discipline", "0%")
+    # Discipline Score (Mon-Sat approx)
+    if len(this_week_df) > 0:
+        d_score = cur_pct
+        m4.metric("Discipline Score", f"{d_score}%")
+    else: m4.metric("Discipline Score", "0%")
 
-    # --- TABS FOR VISUALS ---
+    # --- GRAPH SECTION ---
     st.divider()
     st.subheader("📈 Trends & Consistency")
     
@@ -360,12 +367,12 @@ if not df.empty:
         st.plotly_chart(fig_heat, use_container_width=True)
         
     with tab3:
-        st.caption("This ledger shows every week you competed.")
+        st.caption("This ledger tracks your weekly performance.")
         if history_log:
             hist_df = pd.DataFrame(history_log).sort_values("Week", ascending=False)
             st.dataframe(hist_df, use_container_width=True)
         else:
-            st.info("No history yet. Log your first week!")
+            st.info("No history yet.")
 
     with st.expander("🔐 View Raw Data (PIN Required)"):
         pin = st.text_input("Enter PIN:", type="password", key="history_pin")
