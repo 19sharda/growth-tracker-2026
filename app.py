@@ -140,7 +140,7 @@ with c_title:
 with c_streak:
     st.metric("Current Streak", f"🔥 {streak} Days")
 
-# --- 🧠 SMART MENTOR & ROADMAP (UPDATED) ---
+# --- 🧠 SMART MENTOR & ROADMAP ---
 schedule_df = get_schedule()
 todays_task = "No specific task assigned."
 task_found = False
@@ -154,7 +154,6 @@ if not schedule_df.empty:
 if task_found:
     st.info(f"📅 **TODAY'S MISSION:** {todays_task}")
 
-# EXPANDABLE ROADMAP
 with st.expander("🗺️ View Full AI Roadmap (Click to Expand)"):
     st.markdown("### 📅 Yearly Plan")
     for m in range(1, 13):
@@ -250,17 +249,34 @@ if not df.empty:
     m1, m2, m3, m4 = st.columns(4)
     this_month = df[pd.to_datetime(df["Date"]).dt.month == current_month]
     
+    # --- UPDATED: WEEKLY CALCULATION (Connect 1/Week Logic) ---
     curr_week_num = today.isocalendar().week
     df["Week"] = pd.to_datetime(df["Date"]).dt.isocalendar().week
     df["DayOfWeek"] = pd.to_datetime(df["Date"]).dt.dayofweek 
     this_week_df = df[(df["Week"] == curr_week_num) & (df["DayOfWeek"] != 6)]
     
-    habit_keys = [q["key"] for q in QUESTIONS]
-    tasks_done = this_week_df[habit_keys].sum().sum()
-    total_possible_week = 36 
-    weekly_pct = 0
-    if total_possible_week > 0: weekly_pct = int((tasks_done / total_possible_week) * 100)
+    # Define Habits
+    daily_habits = ["Workout", "Code", "Read", "NoJunk", "SideHustle"]
+    weekly_habit = "Connect"
     
+    # 1. Sum Daily Habits (Max 30 tasks: 5 habits * 6 days)
+    daily_done = this_week_df[daily_habits].sum().sum()
+    
+    # 2. Sum Connect (Capped at 1 for the week)
+    connect_raw = this_week_df[weekly_habit].sum()
+    connect_credit = 1 if connect_raw >= 1 else 0
+    
+    # 3. Total Tasks Done
+    tasks_done = daily_done + connect_credit
+    
+    # 4. Total Possible (Fixed Goal: 31 Tasks)
+    total_possible_week = 31 
+    
+    weekly_pct = 0
+    if total_possible_week > 0: 
+        weekly_pct = int((tasks_done / total_possible_week) * 100)
+    
+    # Days Left Logic
     today_idx = today.weekday()
     if today_idx == 6: days_left_msg = "Week Over"
     else:
@@ -276,27 +292,60 @@ if not df.empty:
         reward_status = "❌ Locked"
         delta_color = "off"
     
-    m1.metric("Weekly Progress", f"{weekly_pct}%", f"{tasks_done}/36 Tasks")
+    m1.metric("Weekly Progress", f"{weekly_pct}%", f"{int(tasks_done)}/31 Tasks")
     m2.metric("Weekly Jackpot", f"{reward_points} Pts", f"{reward_status} | {days_left_msg}", delta_color=delta_color)
     
-    total_habits_all_time = df[habit_keys].sum().sum()
+    # Lifetime score (approximate)
+    all_keys = daily_habits + [weekly_habit]
+    total_habits_all_time = df[all_keys].sum().sum()
     lifetime_score = int(total_habits_all_time * 10) + (reward_points if weekly_pct > 50 else 0)
     m3.metric("Lifetime Score", f"{lifetime_score}", "XP")
     
+    # Discipline Score (Mon-Sat, exclude Connect from daily pressure)
     work_days = this_month[pd.to_datetime(this_month["Date"]).dt.dayofweek != 6]
     if len(work_days) > 0:
-        d_score = int((work_days[habit_keys].sum().sum() / (len(work_days) * 6)) * 100)
+        d_score = int((work_days[daily_habits].sum().sum() / (len(work_days) * 5)) * 100)
         m4.metric("Discipline (Mon-Sat)", f"{d_score}%")
     else: m4.metric("Discipline", "0%")
 
-    if habit_keys:
-        df["Total_Score"] = df[habit_keys].sum(axis=1)
-        heat_data = df.copy()
-        heat_data["Day"] = pd.to_datetime(heat_data["Date"]).dt.day_name()
-        fig = px.density_heatmap(heat_data, x="Week", y="Day", z="Total_Score", nbinsx=52, color_continuous_scale="Greens")
-        st.plotly_chart(fig, use_container_width=True)
+    # --- GRAPH SECTION ---
+    st.divider()
+    st.subheader("📈 Trends & Consistency")
+    
+    chart_tab, heatmap_tab = st.tabs(["📊 Data Visualizer", "🔥 Yearly Grid"])
+    
+    plot_df = df.copy()
+    if all_keys:
+        plot_df["Total_Score"] = plot_df[all_keys].sum(axis=1)
 
-    # --- UPDATED: SECURE HISTORY SECTION ---
+    with chart_tab:
+        view_mode = st.radio("Select View:", ["Daily Trend", "Weekly Progress", "Monthly Summary"], horizontal=True)
+        
+        if view_mode == "Daily Trend":
+            fig_chart = px.bar(plot_df, x="Date", y="Total_Score", title="Daily Habits Completed", color="Total_Score", color_continuous_scale="Blues")
+        elif view_mode == "Weekly Progress":
+            plot_df["Week_Num"] = pd.to_datetime(plot_df["Date"]).dt.isocalendar().week
+            weekly_df = plot_df.groupby("Week_Num")["Total_Score"].sum().reset_index()
+            fig_chart = px.bar(weekly_df, x="Week_Num", y="Total_Score", title="Total Habits per Week", color="Total_Score", color_continuous_scale="Greens", text="Total_Score")
+        elif view_mode == "Monthly Summary":
+            plot_df["Month_Name"] = pd.to_datetime(plot_df["Date"]).dt.month_name()
+            plot_df["Month_Idx"] = pd.to_datetime(plot_df["Date"]).dt.month
+            monthly_df = plot_df.groupby(["Month_Name", "Month_Idx"])["Total_Score"].sum().reset_index().sort_values("Month_Idx")
+            fig_chart = px.bar(monthly_df, x="Month_Name", y="Total_Score", title="Total Habits per Month", color="Total_Score", color_continuous_scale="Reds", text="Total_Score")
+            
+        st.plotly_chart(fig_chart, use_container_width=True)
+
+    with heatmap_tab:
+        heat_data = plot_df.copy()
+        heat_data["Day"] = pd.to_datetime(heat_data["Date"]).dt.day_name()
+        fig_heat = px.density_heatmap(
+            heat_data, x="Week", y="Day", z="Total_Score", nbinsx=52, 
+            color_continuous_scale="Greens",
+            category_orders={"Day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]},
+            title="Consistency Heatmap"
+        )
+        st.plotly_chart(fig_heat, use_container_width=True)
+
     with st.expander("🔐 View History (PIN Required)"):
         pin = st.text_input("Enter PIN:", type="password", key="history_pin")
         if pin == "1234":
