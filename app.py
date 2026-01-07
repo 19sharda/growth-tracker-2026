@@ -63,6 +63,35 @@ def get_schedule():
     except:
         return pd.DataFrame()
 
+# --- NEW: CHECKLIST FUNCTIONS ---
+def get_checklist():
+    try:
+        # Columns: Task, Tag, Status (0=Pending, 1=Done)
+        return conn.read(worksheet="Checklist", usecols=[0, 1, 2], ttl=0)
+    except:
+        return pd.DataFrame(columns=["Task", "Tag", "Status"])
+
+def add_checklist_item(task, tag):
+    df = get_checklist()
+    new_row = pd.DataFrame([{"Task": task, "Tag": tag, "Status": 0}])
+    updated_df = pd.concat([df, new_row], ignore_index=True)
+    conn.update(worksheet="Checklist", data=updated_df)
+    st.toast(f"Added: {task}", icon="📌")
+    time.sleep(1)
+    st.rerun()
+
+def toggle_checklist_item(index, new_status):
+    df = get_checklist()
+    df.at[index, "Status"] = 1 if new_status else 0
+    conn.update(worksheet="Checklist", data=df)
+    st.rerun()
+
+def delete_checklist_item(index):
+    df = get_checklist()
+    df = df.drop(index).reset_index(drop=True)
+    conn.update(worksheet="Checklist", data=df)
+    st.rerun()
+
 def update_data(df):
     conn.update(worksheet="Logs", data=df)
 
@@ -124,7 +153,7 @@ today = get_ist_date()
 current_month = today.month
 df = get_data()
 
-# 1. CALCULATE STREAK
+# 1. STREAK
 streak = 0
 if not df.empty:
     df["Date"] = pd.to_datetime(df["Date"]).dt.date
@@ -214,7 +243,7 @@ with c2:
 
 st.divider()
 
-# 5. CONTROL CENTER
+# 5. CONTROL CENTER (DAILY HABITS)
 st.subheader("📝 Daily Control Center")
 today_data = {}
 if not df.empty and today in df["Date"].values:
@@ -244,6 +273,59 @@ for idx, q in enumerate(QUESTIONS):
                     if chk and not det.strip(): st.error("Detail needed!")
                     else: save_partial_log(today, key, 1 if chk else 0, det)
 
+st.divider()
+
+# --- NEW SECTION: 📌 DYNAMIC CHECKLIST ---
+st.subheader("📌 Dynamic Checklist")
+col_check_1, col_check_2 = st.columns([1, 2])
+
+with col_check_1:
+    with st.form("add_checklist_form"):
+        st.markdown("**Add New Task**")
+        new_task_name = st.text_input("Task Name", placeholder="e.g., Pay Rent, Complete Module 4")
+        new_task_tag = st.selectbox("Tag", ["Weekly", "Monthly", "One-off", "Urgent"])
+        if st.form_submit_button("Add Task"):
+            if new_task_name:
+                add_checklist_item(new_task_name, new_task_tag)
+            else:
+                st.error("Task name required!")
+
+with col_check_2:
+    checklist_df = get_checklist()
+    if not checklist_df.empty:
+        # Filter Pending vs Done
+        pending = checklist_df[checklist_df["Status"] == 0]
+        
+        if not pending.empty:
+            st.markdown(f"**Pending Tasks ({len(pending)})**")
+            for i, row in pending.iterrows():
+                # Display as columns
+                c1, c2, c3 = st.columns([0.1, 0.7, 0.2])
+                with c1:
+                    if st.button("✅", key=f"done_{i}"):
+                        toggle_checklist_item(i, True)
+                with c2:
+                    st.write(f"**{row['Task']}**")
+                with c3:
+                    st.caption(f"_{row['Tag']}_")
+                st.divider()
+        else:
+            st.info("🎉 All caught up! No pending tasks.")
+            
+        with st.expander("View Completed Tasks"):
+            done = checklist_df[checklist_df["Status"] == 1]
+            if not done.empty:
+                for i, row in done.iterrows():
+                    c1, c2 = st.columns([0.8, 0.2])
+                    with c1: st.write(f"~~{row['Task']}~~")
+                    with c2: 
+                        if st.button("🗑️", key=f"del_{i}"):
+                            delete_checklist_item(i)
+            else:
+                st.caption("No completed tasks yet.")
+    else:
+        st.info("Start by adding a Weekly or Monthly task on the left.")
+
 # 6. ANALYTICS
 if not df.empty:
     st.divider()
@@ -256,7 +338,6 @@ if not df.empty:
     daily_habits = ["Workout", "Code", "Read", "NoJunk", "SideHustle"]
     weekly_habit = "Connect"
     
-    # --- CURRENT WEEK CALCS ---
     curr_week = today.isocalendar().week
     curr_year = today.isocalendar().year
     this_week_df = df[(df["Week_Num"] == curr_week) & (df["Year"] == curr_year)]
@@ -281,13 +362,11 @@ if not df.empty:
     if today_idx == 6: days_msg = "Week Over"
     else: days_msg = f"⏳ {5 - today_idx} Days Left"
 
-    # --- WEAKEST LINK CALCULATION (MISSED MOST) ---
+    # Weakest Link
     habit_counts = this_week_df[daily_habits].sum().sort_values()
-    # Get top 2 missed (lowest count)
     missed_habits = habit_counts.head(2).index.tolist()
     missed_msg = ", ".join(missed_habits) if missed_habits else "None! (Great Job)"
 
-    # --- HISTORICAL CALCS ---
     history_groups = df.groupby(["Year", "Week_Num"])
     total_historical_jackpot = 0
     history_log = [] 
@@ -326,7 +405,6 @@ if not df.empty:
         total_daily_slots = len(this_week_df) * 5
         if total_daily_slots > 0: d_score = int((cur_daily / total_daily_slots) * 100)
 
-    # METRICS
     m1, m2 = st.columns(2)
     m3, m4 = st.columns(2)
     m1.metric("Weekly Progress", f"{cur_pct}%", f"{int(cur_total)}/31 Tasks")
@@ -334,7 +412,6 @@ if not df.empty:
     m3.metric("Lifetime Score", f"{final_lifetime_score}", "XP")
     m4.metric("Daily Consistency", f"{d_score}%", "Excl. Connect")
 
-    # --- TABS ---
     st.divider()
     st.subheader("📈 Trends & Consistency")
     tab1, tab2, tab3 = st.tabs(["📊 Charts", "🔥 Heatmap", "🏆 Jackpot & Review"])
@@ -368,20 +445,14 @@ if not df.empty:
         st.plotly_chart(fig_heat, use_container_width=True)
         
     with tab3:
-        # --- WEEKLY REVIEW CARD ---
         is_sunday = today.weekday() == 6
-        
-        # Determine Card Title & State
         retro_title = "📝 Weekly Review (Unlock on Sunday)"
         if is_sunday: retro_title = "📝 Weekly Review (Open Now!)"
         
         with st.expander(retro_title, expanded=is_sunday):
             if is_sunday:
                 st.markdown(f"**Reviewing Week {curr_week}** (Progress: {cur_pct}%)")
-                
-                # SHOW MISSED HABITS
                 st.warning(f"⚠️ **Focus Area:** You missed **{missed_msg}** most this week.")
-                
                 st.caption("Be honest. This is for Future You.")
                 
                 with st.form("weekly_retro_form"):
