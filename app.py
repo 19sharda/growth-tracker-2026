@@ -244,212 +244,221 @@ with c2:
 st.divider()
 
 # 5. CONTROL CENTER (DAILY HABITS)
-st.subheader("📝 Daily Control Center")
-today_data = {}
-if not df.empty and today in df["Date"].values:
-    r = df[df["Date"] == today].iloc[0]
-    for q in QUESTIONS:
-        k = q["key"]
-        val = clean_bool(r.get(k, 0))
-        det = r.get(f"{k}_Detail", "")
-        today_data[k] = {"done": val == 1, "detail": det}
+# WRAPPED IN EXPANDER - Inner expanders removed for container/border style
+with st.expander("📝 Daily Control Center (Click to Open)", expanded=False):
+    today_data = {}
+    if not df.empty and today in df["Date"].values:
+        r = df[df["Date"] == today].iloc[0]
+        for q in QUESTIONS:
+            k = q["key"]
+            val = clean_bool(r.get(k, 0))
+            det = r.get(f"{k}_Detail", "")
+            today_data[k] = {"done": val == 1, "detail": det}
 
-cols = st.columns(3) + st.columns(3)
-for idx, q in enumerate(QUESTIONS):
-    key = q["key"]
-    stat = today_data.get(key, {"done": False, "detail": ""})
-    icon = "✅" if stat["done"] else "⬜"
-    with cols[idx]:
-        with st.expander(f"{icon} {key}", expanded=not stat["done"]):
-            if key == "Code" and task_found:
-                st.info(f"🎯 **Target:** {todays_task}")
-                if not stat["detail"]: stat["detail"] = f"Studied: {todays_task}"
-            
-            st.caption(q["q"])
-            with st.form(f"f_{key}"):
-                chk = st.checkbox("Done?", value=stat["done"])
-                det = st.text_input(q["ask_detail"], value=str(stat["detail"]) if pd.notna(stat["detail"]) else "")
-                if st.form_submit_button("Save"):
-                    if chk and not det.strip(): st.error("Detail needed!")
-                    else: save_partial_log(today, key, 1 if chk else 0, det)
+    cols = st.columns(3) + st.columns(3)
+    for idx, q in enumerate(QUESTIONS):
+        key = q["key"]
+        stat = today_data.get(key, {"done": False, "detail": ""})
+        icon = "✅" if stat["done"] else "⬜"
+        
+        with cols[idx]:
+            # CHANGED: Replaced inner st.expander with st.container to allow nesting
+            with st.container(border=True):
+                st.markdown(f"**{icon} {key}**")
+                
+                if key == "Code" and task_found:
+                    st.info(f"🎯 {todays_task}")
+                    if not stat["detail"]: stat["detail"] = f"Studied: {todays_task}"
+                
+                st.caption(q["q"])
+                with st.form(f"f_{key}"):
+                    chk = st.checkbox("Done?", value=stat["done"])
+                    det = st.text_input(q["ask_detail"], value=str(stat["detail"]) if pd.notna(stat["detail"]) else "")
+                    if st.form_submit_button("Save"):
+                        if chk and not det.strip(): st.error("Detail needed!")
+                        else: save_partial_log(today, key, 1 if chk else 0, det)
 
 st.divider()
 
 # --- NEW SECTION: 📌 DYNAMIC CHECKLIST ---
-st.subheader("📌 Dynamic Checklist")
-col_check_1, col_check_2 = st.columns([1, 2])
+# WRAPPED IN EXPANDER
+with st.expander("📌 Dynamic Checklist (Click to Open)", expanded=False):
+    col_check_1, col_check_2 = st.columns([1, 2])
 
-with col_check_1:
-    with st.form("add_checklist_form"):
-        st.markdown("**Add New Task**")
-        new_task_name = st.text_input("Task Name", placeholder="e.g., Pay Rent, Complete Module 4")
-        new_task_tag = st.selectbox("Tag", ["Weekly", "Monthly", "One-off", "Urgent"])
-        if st.form_submit_button("Add Task"):
-            if new_task_name:
-                add_checklist_item(new_task_name, new_task_tag)
-            else:
-                st.error("Task name required!")
+    with col_check_1:
+        with st.form("add_checklist_form"):
+            st.markdown("**Add New Task**")
+            new_task_name = st.text_input("Task Name", placeholder="e.g., Pay Rent, Complete Module 4")
+            new_task_tag = st.selectbox("Tag", ["Weekly", "Monthly", "One-off", "Urgent"])
+            if st.form_submit_button("Add Task"):
+                if new_task_name:
+                    add_checklist_item(new_task_name, new_task_tag)
+                else:
+                    st.error("Task name required!")
 
-with col_check_2:
-    checklist_df = get_checklist()
-    if not checklist_df.empty:
-        # Filter Pending vs Done
-        pending = checklist_df[checklist_df["Status"] == 0]
-        
-        if not pending.empty:
-            st.markdown(f"**Pending Tasks ({len(pending)})**")
-            for i, row in pending.iterrows():
-                # Display as columns
-                c1, c2, c3 = st.columns([0.1, 0.7, 0.2])
-                with c1:
-                    if st.button("✅", key=f"done_{i}"):
-                        toggle_checklist_item(i, True)
-                with c2:
-                    st.write(f"**{row['Task']}**")
-                with c3:
-                    st.caption(f"_{row['Tag']}_")
-                st.divider()
-        else:
-            st.info("🎉 All caught up! No pending tasks.")
+    with col_check_2:
+        checklist_df = get_checklist()
+        if not checklist_df.empty:
+            # Filter Pending vs Done
+            pending = checklist_df[checklist_df["Status"] == 0]
             
-        with st.expander("View Completed Tasks"):
-            done = checklist_df[checklist_df["Status"] == 1]
-            if not done.empty:
-                for i, row in done.iterrows():
-                    c1, c2 = st.columns([0.8, 0.2])
-                    with c1: st.write(f"~~{row['Task']}~~")
-                    with c2: 
-                        if st.button("🗑️", key=f"del_{i}"):
-                            delete_checklist_item(i)
+            if not pending.empty:
+                st.markdown(f"**Pending Tasks ({len(pending)})**")
+                for i, row in pending.iterrows():
+                    # Display as columns
+                    c1, c2, c3 = st.columns([0.1, 0.7, 0.2])
+                    with c1:
+                        if st.button("✅", key=f"done_{i}"):
+                            toggle_checklist_item(i, True)
+                    with c2:
+                        st.write(f"**{row['Task']}**")
+                    with c3:
+                        st.caption(f"_{row['Tag']}_")
+                    st.divider()
             else:
-                st.caption("No completed tasks yet.")
-    else:
-        st.info("Start by adding a Weekly or Monthly task on the left.")
+                st.info("🎉 All caught up! No pending tasks.")
+                
+            with st.popover("View Completed Tasks"):
+                done = checklist_df[checklist_df["Status"] == 1]
+                if not done.empty:
+                    for i, row in done.iterrows():
+                        c1, c2 = st.columns([0.8, 0.2])
+                        with c1: st.write(f"~~{row['Task']}~~")
+                        with c2: 
+                            if st.button("🗑️", key=f"del_{i}"):
+                                delete_checklist_item(i)
+                else:
+                    st.caption("No completed tasks yet.")
+        else:
+            st.info("Start by adding a Weekly or Monthly task on the left.")
 
 # 6. ANALYTICS
 if not df.empty:
     st.divider()
-    st.subheader("📊 Performance & Rewards")
-    
-    df["Date_Obj"] = pd.to_datetime(df["Date"])
-    df["Week_Num"] = df["Date_Obj"].dt.isocalendar().week
-    df["Year"] = df["Date_Obj"].dt.isocalendar().year
-    
-    daily_habits = ["Workout", "Code", "Read", "NoJunk", "SideHustle"]
-    weekly_habit = "Connect"
-    
-    curr_week = today.isocalendar().week
-    curr_year = today.isocalendar().year
-    this_week_df = df[(df["Week_Num"] == curr_week) & (df["Year"] == curr_year)]
-    
-    cur_daily = this_week_df[daily_habits].sum().sum()
-    cur_connect = 1 if this_week_df[weekly_habit].sum() >= 1 else 0
-    cur_total = cur_daily + cur_connect
-    cur_possible = 31
-    cur_pct = 0
-    if cur_possible > 0: cur_pct = int((cur_total / cur_possible) * 100)
-    
-    cur_reward = 0
-    if cur_pct > 50:
-        cur_reward = int(cur_pct) * 5
-        reward_status = "🔓 UNLOCKED!"
-        delta_color = "normal"
-    else:
-        reward_status = "❌ Locked"
-        delta_color = "off"
-    
-    today_idx = today.weekday()
-    if today_idx == 6: days_msg = "Week Over"
-    else: days_msg = f"⏳ {5 - today_idx} Days Left"
-
-    # Weakest Link
-    habit_counts = this_week_df[daily_habits].sum().sort_values()
-    missed_habits = habit_counts.head(2).index.tolist()
-    missed_msg = ", ".join(missed_habits) if missed_habits else "None! (Great Job)"
-
-    history_groups = df.groupby(["Year", "Week_Num"])
-    total_historical_jackpot = 0
-    history_log = [] 
-    
-    for (h_year, h_week), group in history_groups:
-        h_daily = group[daily_habits].sum().sum()
-        h_connect = 1 if group[weekly_habit].sum() >= 1 else 0
-        h_total = h_daily + h_connect
-        h_pct = int((h_total / 31) * 100)
+    # WRAPPED IN EXPANDER
+    with st.expander("📊 Analytics & History (Click to Open)", expanded=False):
         
-        retro_note = ""
-        if "Weekly_Retro" in group.columns:
-            retro_list = group[group["Weekly_Retro"].notna() & (group["Weekly_Retro"] != "")]["Weekly_Retro"].tolist()
-            if retro_list: retro_note = retro_list[-1]
+        df["Date_Obj"] = pd.to_datetime(df["Date"])
+        df["Week_Num"] = df["Date_Obj"].dt.isocalendar().week
+        df["Year"] = df["Date_Obj"].dt.isocalendar().year
         
-        pts = 0
-        status = "❌ Missed"
-        if h_pct > 50:
-            pts = h_pct * 5
-            total_historical_jackpot += pts
-            status = "🏆 WON"
+        daily_habits = ["Workout", "Code", "Read", "NoJunk", "SideHustle"]
+        weekly_habit = "Connect"
+        
+        curr_week = today.isocalendar().week
+        curr_year = today.isocalendar().year
+        this_week_df = df[(df["Week_Num"] == curr_week) & (df["Year"] == curr_year)]
+        
+        cur_daily = this_week_df[daily_habits].sum().sum()
+        cur_connect = 1 if this_week_df[weekly_habit].sum() >= 1 else 0
+        cur_total = cur_daily + cur_connect
+        cur_possible = 31
+        cur_pct = 0
+        if cur_possible > 0: cur_pct = int((cur_total / cur_possible) * 100)
+        
+        cur_reward = 0
+        if cur_pct > 50:
+            cur_reward = int(cur_pct) * 5
+            reward_status = "🔓 UNLOCKED!"
+            delta_color = "normal"
+        else:
+            reward_status = "❌ Locked"
+            delta_color = "off"
+        
+        today_idx = today.weekday()
+        if today_idx == 6: days_msg = "Week Over"
+        else: days_msg = f"⏳ {5 - today_idx} Days Left"
+
+        # Weakest Link
+        habit_counts = this_week_df[daily_habits].sum().sort_values()
+        missed_habits = habit_counts.head(2).index.tolist()
+        missed_msg = ", ".join(missed_habits) if missed_habits else "None! (Great Job)"
+
+        history_groups = df.groupby(["Year", "Week_Num"])
+        total_historical_jackpot = 0
+        history_log = [] 
+        
+        for (h_year, h_week), group in history_groups:
+            h_daily = group[daily_habits].sum().sum()
+            h_connect = 1 if group[weekly_habit].sum() >= 1 else 0
+            h_total = h_daily + h_connect
+            h_pct = int((h_total / 31) * 100)
             
-        history_log.append({
-            "Week": f"{h_year}-W{h_week}",
-            "Tasks Done": int(h_total),
-            "Completion": f"{h_pct}%",
-            "Points": pts,
-            "Status": status,
-            "Retrospective": retro_note
-        })
+            retro_note = ""
+            if "Weekly_Retro" in group.columns:
+                retro_list = group[group["Weekly_Retro"].notna() & (group["Weekly_Retro"] != "")]["Weekly_Retro"].tolist()
+                if retro_list: retro_note = retro_list[-1]
+            
+            pts = 0
+            status = "❌ Missed"
+            if h_pct > 50:
+                pts = h_pct * 5
+                total_historical_jackpot += pts
+                status = "🏆 WON"
+                
+            history_log.append({
+                "Week": f"{h_year}-W{h_week}",
+                "Tasks Done": int(h_total),
+                "Completion": f"{h_pct}%",
+                "Points": pts,
+                "Status": status,
+                "Retrospective": retro_note
+            })
 
-    raw_xp = df[daily_habits + [weekly_habit]].sum().sum() * 10
-    final_lifetime_score = raw_xp + total_historical_jackpot
-    d_score = 0
-    if len(this_week_df) > 0:
-        total_daily_slots = len(this_week_df) * 5
-        if total_daily_slots > 0: d_score = int((cur_daily / total_daily_slots) * 100)
+        raw_xp = df[daily_habits + [weekly_habit]].sum().sum() * 10
+        final_lifetime_score = raw_xp + total_historical_jackpot
+        d_score = 0
+        if len(this_week_df) > 0:
+            total_daily_slots = len(this_week_df) * 5
+            if total_daily_slots > 0: d_score = int((cur_daily / total_daily_slots) * 100)
 
-    m1, m2 = st.columns(2)
-    m3, m4 = st.columns(2)
-    m1.metric("Weekly Progress", f"{cur_pct}%", f"{int(cur_total)}/31 Tasks")
-    m2.metric("Weekly Jackpot", f"{cur_reward} Pts", f"{reward_status} | {days_msg}", delta_color=delta_color)
-    m3.metric("Lifetime Score", f"{final_lifetime_score}", "XP")
-    m4.metric("Daily Consistency", f"{d_score}%", "Excl. Connect")
+        m1, m2 = st.columns(2)
+        m3, m4 = st.columns(2)
+        m1.metric("Weekly Progress", f"{cur_pct}%", f"{int(cur_total)}/31 Tasks")
+        m2.metric("Weekly Jackpot", f"{cur_reward} Pts", f"{reward_status} | {days_msg}", delta_color=delta_color)
+        m3.metric("Lifetime Score", f"{final_lifetime_score}", "XP")
+        m4.metric("Daily Consistency", f"{d_score}%", "Excl. Connect")
 
-    st.divider()
-    st.subheader("📈 Trends & Consistency")
-    tab1, tab2, tab3 = st.tabs(["📊 Charts", "🔥 Heatmap", "🏆 Jackpot & Review"])
-    
-    plot_df = df.copy()
-    all_keys = daily_habits + [weekly_habit]
-    if all_keys: plot_df["Total_Score"] = plot_df[all_keys].sum(axis=1)
-
-    with tab1:
-        view_mode = st.radio("View:", ["Daily Trend", "Weekly Progress", "Monthly Summary"], horizontal=True)
-        if view_mode == "Daily Trend":
-            fig_chart = px.bar(plot_df, x="Date", y="Total_Score", color="Total_Score", color_continuous_scale="Blues")
-        elif view_mode == "Weekly Progress":
-            weekly_df = plot_df.groupby("Week_Num")["Total_Score"].sum().reset_index()
-            fig_chart = px.bar(weekly_df, x="Week_Num", y="Total_Score", color="Total_Score", color_continuous_scale="Greens", text="Total_Score")
-        elif view_mode == "Monthly Summary":
-            plot_df["Month_Name"] = plot_df["Date_Obj"].dt.month_name()
-            plot_df["Month_Idx"] = plot_df["Date_Obj"].dt.month
-            monthly_df = plot_df.groupby(["Month_Name", "Month_Idx"])["Total_Score"].sum().reset_index().sort_values("Month_Idx")
-            fig_chart = px.bar(monthly_df, x="Month_Name", y="Total_Score", color="Total_Score", color_continuous_scale="Reds", text="Total_Score")
-        st.plotly_chart(fig_chart, use_container_width=True)
-
-    with tab2:
-        heat_data = plot_df.copy()
-        heat_data["Day"] = heat_data["Date_Obj"].dt.day_name()
-        fig_heat = px.density_heatmap(
-            heat_data, x="Week_Num", y="Day", z="Total_Score", nbinsx=52, 
-            color_continuous_scale="Greens",
-            category_orders={"Day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]}
-        )
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.divider()
+        st.subheader("📈 Trends & Consistency")
+        tab1, tab2, tab3 = st.tabs(["📊 Charts", "🔥 Heatmap", "🏆 Jackpot & Review"])
         
-    with tab3:
-        is_sunday = today.weekday() == 6
-        retro_title = "📝 Weekly Review (Unlock on Sunday)"
-        if is_sunday: retro_title = "📝 Weekly Review (Open Now!)"
-        
-        with st.expander(retro_title, expanded=is_sunday):
+        plot_df = df.copy()
+        all_keys = daily_habits + [weekly_habit]
+        if all_keys: plot_df["Total_Score"] = plot_df[all_keys].sum(axis=1)
+
+        with tab1:
+            view_mode = st.radio("View:", ["Daily Trend", "Weekly Progress", "Monthly Summary"], horizontal=True)
+            if view_mode == "Daily Trend":
+                fig_chart = px.bar(plot_df, x="Date", y="Total_Score", color="Total_Score", color_continuous_scale="Blues")
+            elif view_mode == "Weekly Progress":
+                weekly_df = plot_df.groupby("Week_Num")["Total_Score"].sum().reset_index()
+                fig_chart = px.bar(weekly_df, x="Week_Num", y="Total_Score", color="Total_Score", color_continuous_scale="Greens", text="Total_Score")
+            elif view_mode == "Monthly Summary":
+                plot_df["Month_Name"] = plot_df["Date_Obj"].dt.month_name()
+                plot_df["Month_Idx"] = plot_df["Date_Obj"].dt.month
+                monthly_df = plot_df.groupby(["Month_Name", "Month_Idx"])["Total_Score"].sum().reset_index().sort_values("Month_Idx")
+                fig_chart = px.bar(monthly_df, x="Month_Name", y="Total_Score", color="Total_Score", color_continuous_scale="Reds", text="Total_Score")
+            st.plotly_chart(fig_chart, use_container_width=True)
+
+        with tab2:
+            heat_data = plot_df.copy()
+            heat_data["Day"] = heat_data["Date_Obj"].dt.day_name()
+            fig_heat = px.density_heatmap(
+                heat_data, x="Week_Num", y="Day", z="Total_Score", nbinsx=52, 
+                color_continuous_scale="Greens",
+                category_orders={"Day": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]}
+            )
+            st.plotly_chart(fig_heat, use_container_width=True)
+            
+        with tab3:
+            # Removed inner st.expander to avoid nesting issues
+            is_sunday = today.weekday() == 6
+            retro_title = "📝 Weekly Review (Unlock on Sunday)"
+            if is_sunday: retro_title = "📝 Weekly Review (Open Now!)"
+            
+            st.markdown(f"#### {retro_title}")
+            
             if is_sunday:
                 st.markdown(f"**Reviewing Week {curr_week}** (Progress: {cur_pct}%)")
                 st.warning(f"⚠️ **Focus Area:** You missed **{missed_msg}** most this week.")
@@ -467,40 +476,41 @@ if not df.empty:
                         save_generic_text(today, "Weekly_Retro", full_review)
             else:
                 st.info("🔒 This form is locked until Sunday. Focus on your daily tasks for now!")
-        
-        st.divider()
-        st.markdown("### 📜 Past Reviews & Ledger")
-        st.metric("Total Career Earnings", f"{total_historical_jackpot} Pts")
-        
-        if history_log:
-            history_log.sort(key=lambda x: x['Week'], reverse=True)
-            for entry in history_log:
-                with st.container():
-                    c_head, c_pts = st.columns([3, 1])
-                    c_head.markdown(f"#### **{entry['Week']}** - {entry['Status']}")
-                    c_pts.metric("Pts", entry['Points'])
-                    
-                    raw_retro = entry['Retrospective']
-                    if raw_retro and "|" in raw_retro:
-                        parts = raw_retro.split("|")
-                        if len(parts) >= 4:
-                            st.markdown(f"""
-                            - 🏆 **Win:** {parts[0]}
-                            - 📉 **Miss:** {parts[1]}
-                            - 🧐 **Why:** {parts[2]}
-                            - 🛠️ **Fix:** {parts[3]}
-                            - 🔥 **Commitment:** {parts[4]}/10
-                            """)
-                        else: st.text(f"📝 Note: {raw_retro}")
-                    elif raw_retro: st.text(f"📝 Note: {raw_retro}")
-                    else: st.caption("No review submitted.")
-                    st.divider()
-        else:
-            st.info("No history yet.")
+            
+            st.divider()
+            st.markdown("### 📜 Past Reviews & Ledger")
+            st.metric("Total Career Earnings", f"{total_historical_jackpot} Pts")
+            
+            if history_log:
+                history_log.sort(key=lambda x: x['Week'], reverse=True)
+                for entry in history_log:
+                    with st.container():
+                        c_head, c_pts = st.columns([3, 1])
+                        c_head.markdown(f"#### **{entry['Week']}** - {entry['Status']}")
+                        c_pts.metric("Pts", entry['Points'])
+                        
+                        raw_retro = entry['Retrospective']
+                        if raw_retro and "|" in raw_retro:
+                            parts = raw_retro.split("|")
+                            if len(parts) >= 4:
+                                st.markdown(f"""
+                                - 🏆 **Win:** {parts[0]}
+                                - 📉 **Miss:** {parts[1]}
+                                - 🧐 **Why:** {parts[2]}
+                                - 🛠️ **Fix:** {parts[3]}
+                                - 🔥 **Commitment:** {parts[4]}/10
+                                """)
+                            else: st.text(f"📝 Note: {raw_retro}")
+                        elif raw_retro: st.text(f"📝 Note: {raw_retro}")
+                        else: st.caption("No review submitted.")
+                        st.divider()
+            else:
+                st.info("No history yet.")
 
-    with st.expander("🔐 View Raw Data (PIN Required)"):
-        pin = st.text_input("Enter PIN:", type="password", key="history_pin")
-        if pin == "1234":
-            st.dataframe(df.sort_values("Date", ascending=False))
-        elif pin:
-            st.error("🔒 Incorrect PIN")
+        # Replaced st.expander with st.popover to avoid nesting issues in tabs/expanders
+        with st.popover("🔐 View Raw Data (PIN Required)"):
+            pin = st.text_input("Enter PIN:", type="password", key="history_pin")
+            if pin == "1234":
+                st.dataframe(df.sort_values("Date", ascending=False))
+            elif pin:
+                st.error("🔒 Incorrect PIN")
