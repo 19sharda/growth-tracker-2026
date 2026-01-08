@@ -63,10 +63,9 @@ def get_schedule():
     except:
         return pd.DataFrame()
 
-# --- NEW: CHECKLIST FUNCTIONS ---
+# --- CHECKLIST FUNCTIONS ---
 def get_checklist():
     try:
-        # Columns: Task, Tag, Status (0=Pending, 1=Done)
         return conn.read(worksheet="Checklist", usecols=[0, 1, 2], ttl=0)
     except:
         return pd.DataFrame(columns=["Task", "Tag", "Status"])
@@ -187,7 +186,7 @@ if not schedule_df.empty:
 
 if task_found: st.info(f"📅 **TODAY'S MISSION:** {todays_task}")
 
-with st.expander("🗺️ View Full AI Roadmap (Click to Expand)"):
+with st.expander("🗺️ View Full AI Roadmap (Click to Expand)", expanded=False):
     st.markdown("### 📅 Yearly Plan")
     for m in range(1, 13):
         data = AI_ROADMAP.get(m, {"topic": "TBD", "link": "#"})
@@ -244,44 +243,41 @@ with c2:
 st.divider()
 
 # 5. CONTROL CENTER (DAILY HABITS)
-# WRAPPED IN EXPANDER - Inner expanders removed for container/border style
-with st.expander("📝 Daily Control Center (Click to Open)", expanded=False):
-    today_data = {}
-    if not df.empty and today in df["Date"].values:
-        r = df[df["Date"] == today].iloc[0]
-        for q in QUESTIONS:
-            k = q["key"]
-            val = clean_bool(r.get(k, 0))
-            det = r.get(f"{k}_Detail", "")
-            today_data[k] = {"done": val == 1, "detail": det}
+st.subheader("📝 Daily Control Center")
+# NOTE: Removed outer st.expander to allow inner items to be expanders
+today_data = {}
+if not df.empty and today in df["Date"].values:
+    r = df[df["Date"] == today].iloc[0]
+    for q in QUESTIONS:
+        k = q["key"]
+        val = clean_bool(r.get(k, 0))
+        det = r.get(f"{k}_Detail", "")
+        today_data[k] = {"done": val == 1, "detail": det}
 
-    cols = st.columns(3) + st.columns(3)
-    for idx, q in enumerate(QUESTIONS):
-        key = q["key"]
-        stat = today_data.get(key, {"done": False, "detail": ""})
-        icon = "✅" if stat["done"] else "⬜"
-        
-        with cols[idx]:
-            # CHANGED: Replaced inner st.expander with st.container to allow nesting
-            with st.container(border=True):
-                st.markdown(f"**{icon} {key}**")
-                
-                if key == "Code" and task_found:
-                    st.info(f"🎯 {todays_task}")
-                    if not stat["detail"]: stat["detail"] = f"Studied: {todays_task}"
-                
-                st.caption(q["q"])
-                with st.form(f"f_{key}"):
-                    chk = st.checkbox("Done?", value=stat["done"])
-                    det = st.text_input(q["ask_detail"], value=str(stat["detail"]) if pd.notna(stat["detail"]) else "")
-                    if st.form_submit_button("Save"):
-                        if chk and not det.strip(): st.error("Detail needed!")
-                        else: save_partial_log(today, key, 1 if chk else 0, det)
+cols = st.columns(3) + st.columns(3)
+for idx, q in enumerate(QUESTIONS):
+    key = q["key"]
+    stat = today_data.get(key, {"done": False, "detail": ""})
+    icon = "✅" if stat["done"] else "⬜"
+    
+    with cols[idx]:
+        # RESTORED: These are now Expanders again!
+        with st.expander(f"{icon} {key}", expanded=not stat["done"]):
+            if key == "Code" and task_found:
+                st.info(f"🎯 **Target:** {todays_task}")
+                if not stat["detail"]: stat["detail"] = f"Studied: {todays_task}"
+            
+            st.caption(q["q"])
+            with st.form(f"f_{key}"):
+                chk = st.checkbox("Done?", value=stat["done"])
+                det = st.text_input(q["ask_detail"], value=str(stat["detail"]) if pd.notna(stat["detail"]) else "")
+                if st.form_submit_button("Save"):
+                    if chk and not det.strip(): st.error("Detail needed!")
+                    else: save_partial_log(today, key, 1 if chk else 0, det)
 
 st.divider()
 
-# --- NEW SECTION: 📌 DYNAMIC CHECKLIST ---
-# WRAPPED IN EXPANDER
+# --- DYNAMIC CHECKLIST (Main Section is Expander) ---
 with st.expander("📌 Dynamic Checklist (Click to Open)", expanded=False):
     col_check_1, col_check_2 = st.columns([1, 2])
 
@@ -299,21 +295,16 @@ with st.expander("📌 Dynamic Checklist (Click to Open)", expanded=False):
     with col_check_2:
         checklist_df = get_checklist()
         if not checklist_df.empty:
-            # Filter Pending vs Done
             pending = checklist_df[checklist_df["Status"] == 0]
-            
             if not pending.empty:
                 st.markdown(f"**Pending Tasks ({len(pending)})**")
                 for i, row in pending.iterrows():
-                    # Display as columns
                     c1, c2, c3 = st.columns([0.1, 0.7, 0.2])
                     with c1:
                         if st.button("✅", key=f"done_{i}"):
                             toggle_checklist_item(i, True)
-                    with c2:
-                        st.write(f"**{row['Task']}**")
-                    with c3:
-                        st.caption(f"_{row['Tag']}_")
+                    with c2: st.write(f"**{row['Task']}**")
+                    with c3: st.caption(f"_{row['Tag']}_")
                     st.divider()
             else:
                 st.info("🎉 All caught up! No pending tasks.")
@@ -332,10 +323,9 @@ with st.expander("📌 Dynamic Checklist (Click to Open)", expanded=False):
         else:
             st.info("Start by adding a Weekly or Monthly task on the left.")
 
-# 6. ANALYTICS
+# 6. ANALYTICS (Main Section is Expander)
 if not df.empty:
     st.divider()
-    # WRAPPED IN EXPANDER
     with st.expander("📊 Analytics & History (Click to Open)", expanded=False):
         
         df["Date_Obj"] = pd.to_datetime(df["Date"])
@@ -369,7 +359,6 @@ if not df.empty:
         if today_idx == 6: days_msg = "Week Over"
         else: days_msg = f"⏳ {5 - today_idx} Days Left"
 
-        # Weakest Link
         habit_counts = this_week_df[daily_habits].sum().sort_values()
         missed_habits = habit_counts.head(2).index.tolist()
         missed_msg = ", ".join(missed_habits) if missed_habits else "None! (Great Job)"
@@ -452,17 +441,14 @@ if not df.empty:
             st.plotly_chart(fig_heat, use_container_width=True)
             
         with tab3:
-            # Removed inner st.expander to avoid nesting issues
             is_sunday = today.weekday() == 6
             retro_title = "📝 Weekly Review (Unlock on Sunday)"
             if is_sunday: retro_title = "📝 Weekly Review (Open Now!)"
-            
             st.markdown(f"#### {retro_title}")
             
             if is_sunday:
                 st.markdown(f"**Reviewing Week {curr_week}** (Progress: {cur_pct}%)")
                 st.warning(f"⚠️ **Focus Area:** You missed **{missed_msg}** most this week.")
-                st.caption("Be honest. This is for Future You.")
                 
                 with st.form("weekly_retro_form"):
                     q1 = st.text_input("1. 🏆 Big Win:", placeholder="e.g. Hit all workouts")
@@ -470,7 +456,6 @@ if not df.empty:
                     q3 = st.text_input("3. 🧐 Why it happened?", placeholder="e.g. Stayed up too late")
                     q4 = st.text_input("4. 🛠️ The Fix:", placeholder="e.g. Phone off at 10pm")
                     q5 = st.slider("5. 🔥 Commitment for Next Week?", 1, 10, 8)
-                    
                     if st.form_submit_button("Save Weekly Review"):
                         full_review = f"{q1}|{q2}|{q3}|{q4}|{q5}"
                         save_generic_text(today, "Weekly_Retro", full_review)
@@ -493,13 +478,7 @@ if not df.empty:
                         if raw_retro and "|" in raw_retro:
                             parts = raw_retro.split("|")
                             if len(parts) >= 4:
-                                st.markdown(f"""
-                                - 🏆 **Win:** {parts[0]}
-                                - 📉 **Miss:** {parts[1]}
-                                - 🧐 **Why:** {parts[2]}
-                                - 🛠️ **Fix:** {parts[3]}
-                                - 🔥 **Commitment:** {parts[4]}/10
-                                """)
+                                st.markdown(f"- 🏆 **Win:** {parts[0]}\n- 📉 **Miss:** {parts[1]}\n- 🧐 **Why:** {parts[2]}\n- 🛠️ **Fix:** {parts[3]}\n- 🔥 **Commitment:** {parts[4]}/10")
                             else: st.text(f"📝 Note: {raw_retro}")
                         elif raw_retro: st.text(f"📝 Note: {raw_retro}")
                         else: st.caption("No review submitted.")
@@ -507,7 +486,6 @@ if not df.empty:
             else:
                 st.info("No history yet.")
 
-        # Replaced st.expander with st.popover to avoid nesting issues in tabs/expanders
         with st.popover("🔐 View Raw Data (PIN Required)"):
             pin = st.text_input("Enter PIN:", type="password", key="history_pin")
             if pin == "1234":
