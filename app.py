@@ -62,15 +62,10 @@ def get_schedule():
     except:
         return pd.DataFrame()
 
-def update_data(df):
-    conn.update(worksheet="Logs", data=df)
-
-# --- CHECKLIST LOGIC (UPDATED) ---
+# --- CHECKLIST FUNCTIONS ---
 def get_checklist():
     try:
-        # Columns: Task, Tag, Status, Last_Completed
         df = conn.read(worksheet="Checklist", usecols=[0, 1, 2, 3], ttl=0)
-        # Ensure Last_Completed is string/object to prevent errors
         df["Last_Completed"] = df["Last_Completed"].astype(str)
         return df
     except:
@@ -81,7 +76,6 @@ def update_checklist(df):
 
 def add_checklist_item(task, tag):
     df = get_checklist()
-    # New tasks start as Status 0 (Pending) with no completion date
     new_row = pd.DataFrame([{"Task": task, "Tag": tag, "Status": 0, "Last_Completed": ""}])
     updated_df = pd.concat([df, new_row], ignore_index=True)
     update_checklist(updated_df)
@@ -92,11 +86,8 @@ def add_checklist_item(task, tag):
 def toggle_checklist_item(index, new_status):
     df = get_checklist()
     df.at[index, "Status"] = 1 if new_status else 0
-    
-    # If marking as DONE, save Today's Date
     if new_status:
         df.at[index, "Last_Completed"] = str(get_ist_date())
-    
     update_checklist(df)
     st.rerun()
 
@@ -106,55 +97,38 @@ def delete_checklist_item(index):
     update_checklist(df)
     st.rerun()
 
-# --- SMART RESET LOGIC (The "Recurring" Feature) ---
 def check_recurring_resets():
     df = get_checklist()
     if df.empty: return
-
     today = get_ist_date()
-    # Get current Week Number and Month
     current_week = today.isocalendar().week
     current_month = today.month
-    
     data_changed = False
     
     for i, row in df.iterrows():
-        # Only check items that are marked DONE (Status 1)
         if row["Status"] == 1:
             last_date_str = str(row["Last_Completed"])
-            
-            # Skip if date is empty or invalid
-            if not last_date_str or last_date_str == "nan":
-                continue
-                
+            if not last_date_str or last_date_str == "nan": continue
             try:
                 last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date()
-                
-                # WEEKLY LOGIC:
-                # If tag is Weekly AND Last completed was in a PREVIOUS week -> Reset to 0
                 if row["Tag"] == "Weekly":
                     if last_date.isocalendar().week != current_week:
                         df.at[i, "Status"] = 0
                         data_changed = True
-                        
-                # MONTHLY LOGIC:
-                # If tag is Monthly AND Last completed was in a PREVIOUS month -> Reset to 0
                 elif row["Tag"] == "Monthly":
                     if last_date.month != current_month:
                         df.at[i, "Status"] = 0
                         data_changed = True
-                        
-            except:
-                continue
+            except: continue
+    if data_changed: update_checklist(df)
 
-    if data_changed:
-        update_checklist(df)
+def update_data(df):
+    conn.update(worksheet="Logs", data=df)
 
-# --- DAILY LOG SAVE ---
+# --- SAVE LOGIC ---
 def save_partial_log(date_obj, key, val, detail):
     df = get_data()
     if not df.empty: df["Date"] = pd.to_datetime(df["Date"]).dt.date
-    
     if not df.empty and date_obj in df["Date"].values:
         mask = df["Date"] == date_obj
         df.loc[mask, key] = val
@@ -172,7 +146,6 @@ def save_partial_log(date_obj, key, val, detail):
         new_row[f"{key}_Detail"] = detail
         new_df = pd.DataFrame([new_row])
         final_df = pd.concat([df, new_df], ignore_index=True)
-    
     update_data(final_df)
     today_row = final_df[final_df["Date"] == date_obj].iloc[0]
     total_done = sum([1 for q in QUESTIONS if today_row.get(q["key"], 0) == 1])
@@ -202,10 +175,7 @@ def save_generic_text(date_obj, col_name, text):
 # --- APP START ---
 today = get_ist_date()
 current_month = today.month
-
-# RUN AUTO-RESET CHECK
 check_recurring_resets()
-
 df = get_data()
 
 # 1. STREAK
@@ -225,16 +195,11 @@ if not df.empty:
 # --- SIDEBAR: BUYING LIST ---
 with st.sidebar:
     st.title("🛒 Buying List")
-    st.caption("Quick add for shopping/needs")
-    
     with st.form("shopping_form"):
         shop_item = st.text_input("Item Name")
-        if st.form_submit_button("Add Item"):
+        if st.form_submit_button("Add"):
             if shop_item: add_checklist_item(shop_item, "Shopping")
-    
     st.divider()
-    
-    # Show Shopping Items
     checklist_df = get_checklist()
     if not checklist_df.empty:
         shopping_list = checklist_df[checklist_df["Tag"] == "Shopping"]
@@ -248,12 +213,10 @@ with st.sidebar:
                     else:
                         if is_checked: toggle_checklist_item(i, False)
                 with c2:
-                    if st.button("🗑️", key=f"del_shop_{i}"):
-                        delete_checklist_item(i)
-        else:
-            st.info("List is empty!")
+                    if st.button("🗑️", key=f"del_shop_{i}"): delete_checklist_item(i)
+        else: st.caption("Cart empty.")
 
-# --- MAIN PAGE HEADER ---
+# 2. HEADER
 c_title, c_streak = st.columns([3, 1])
 with c_title:
     st.title("🚀 2026 Growth Tracker")
@@ -273,7 +236,7 @@ if not schedule_df.empty:
 
 if task_found: st.info(f"📅 **TODAY'S MISSION:** {todays_task}")
 
-with st.expander("🗺️ View Full AI Roadmap (Click to Expand)"):
+with st.expander("🗺️ View Full AI Roadmap (Click to Expand)", expanded=False):
     st.markdown("### 📅 Yearly Plan")
     for m in range(1, 13):
         data = AI_ROADMAP.get(m, {"topic": "TBD", "link": "#"})
@@ -281,14 +244,16 @@ with st.expander("🗺️ View Full AI Roadmap (Click to Expand)"):
         style = "**" if m == current_month else ""
         st.markdown(f"{prefix} {style}Month {m}: [{data['topic']}]({data['link']}){style}")
 
-# 4. STATUS
+# 4. STATUS & GIF
 today_progress = 0
+today_reflection = ""
 if not df.empty and today in df["Date"].values:
     row = df[df["Date"] == today].iloc[0]
     def clean_bool(val):
         try: return 1 if float(val) > 0 else 0
         except: return 1 if str(val).upper() in ["TRUE", "T", "YES", "ON"] else 0
     today_progress = sum([1 for q in QUESTIONS if clean_bool(row.get(q["key"], 0)) == 1])
+    today_reflection = row.get("Reflection", "") if pd.notna(row.get("Reflection", "")) else ""
 
 if today_progress >= 4:
     current_gif = GIF_HIGH
@@ -319,100 +284,85 @@ with c2:
             new_g = st.text_input("One Goal:")
             if st.button("Commit Goal"): save_generic_text(today, "Next_Goal", new_g)
     with cg2:
-        today_reflection = ""
-        if not df.empty and today in df["Date"].values:
-             r = df[df["Date"] == today].iloc[0]
-             today_reflection = r.get("Reflection", "")
         if today_reflection: st.caption(f"📝 {today_reflection}")
         else: st.caption("📝 No reflection yet.")
         with st.popover("Add Note"):
-            new_r = st.text_area("Note:", value=today_reflection if pd.notna(today_reflection) else "")
+            new_r = st.text_area("Note:", value=today_reflection)
             if st.button("Save Note"): save_generic_text(today, "Reflection", new_r)
 
 st.divider()
 
-# 5. CONTROL CENTER
-st.subheader("📝 Daily Control Center")
-today_data = {}
-if not df.empty and today in df["Date"].values:
-    r = df[df["Date"] == today].iloc[0]
-    for q in QUESTIONS:
-        k = q["key"]
-        val = clean_bool(r.get(k, 0))
-        det = r.get(f"{k}_Detail", "")
-        today_data[k] = {"done": val == 1, "detail": det}
+# --- 5. CONTROL CENTER (EXPANDER) ---
+with st.expander("📝 Daily Control Center (Click to Open)", expanded=False):
+    today_data = {}
+    if not df.empty and today in df["Date"].values:
+        r = df[df["Date"] == today].iloc[0]
+        for q in QUESTIONS:
+            k = q["key"]
+            val = clean_bool(r.get(k, 0))
+            det = r.get(f"{k}_Detail", "")
+            today_data[k] = {"done": val == 1, "detail": det}
 
-cols = st.columns(3) + st.columns(3)
-for idx, q in enumerate(QUESTIONS):
-    key = q["key"]
-    stat = today_data.get(key, {"done": False, "detail": ""})
-    icon = "✅" if stat["done"] else "⬜"
-    with cols[idx]:
-        with st.expander(f"{icon} {key}", expanded=not stat["done"]):
-            if key == "Code" and task_found:
-                st.info(f"🎯 **Target:** {todays_task}")
-                if not stat["detail"]: stat["detail"] = f"Studied: {todays_task}"
-            st.caption(q["q"])
-            with st.form(f"f_{key}"):
-                chk = st.checkbox("Done?", value=stat["done"])
-                det = st.text_input(q["ask_detail"], value=str(stat["detail"]) if pd.notna(stat["detail"]) else "")
-                if st.form_submit_button("Save"):
-                    if chk and not det.strip(): st.error("Detail needed!")
-                    else: save_partial_log(today, key, 1 if chk else 0, det)
+    cols = st.columns(3) + st.columns(3)
+    for idx, q in enumerate(QUESTIONS):
+        key = q["key"]
+        stat = today_data.get(key, {"done": False, "detail": ""})
+        # NOTE: Changed from Expander to Container to allow parent Expander
+        with cols[idx]:
+            with st.container(border=True):
+                # Header Line
+                st.markdown(f"**{q['icon']} {key}**")
+                if key == "Code" and task_found:
+                    st.info(f"🎯 {todays_task}")
+                    if not stat["detail"]: stat["detail"] = f"Studied: {todays_task}"
+                
+                with st.form(f"f_{key}"):
+                    chk = st.checkbox("Done?", value=stat["done"])
+                    det = st.text_input(q["ask_detail"], value=str(stat["detail"]) if pd.notna(stat["detail"]) else "")
+                    if st.form_submit_button("Save"):
+                        if chk and not det.strip(): st.error("Detail needed!")
+                        else: save_partial_log(today, key, 1 if chk else 0, det)
 
-st.divider()
+# --- 📌 RECURRING TASKS (EXPANDER) ---
+with st.expander("📌 Recurring Tasks (Click to Open)", expanded=False):
+    col_check_1, col_check_2 = st.columns([1, 2])
 
-# --- 📌 RECURRING TASKS SECTION (Main Page) ---
-st.subheader("📌 Recurring Tasks (Weekly/Monthly)")
-col_check_1, col_check_2 = st.columns([1, 2])
+    with col_check_1:
+        with st.form("add_checklist_form"):
+            st.markdown("**Add Recurring Task**")
+            new_task_name = st.text_input("Task Name")
+            new_task_tag = st.selectbox("Frequency", ["Weekly", "Monthly", "One-off"])
+            if st.form_submit_button("Add Task"):
+                if new_task_name: add_checklist_item(new_task_name, new_task_tag)
+                else: st.error("Name required!")
 
-with col_check_1:
-    with st.form("add_checklist_form"):
-        st.markdown("**Add Recurring Task**")
-        new_task_name = st.text_input("Task Name")
-        new_task_tag = st.selectbox("Frequency", ["Weekly", "Monthly", "One-off"])
-        if st.form_submit_button("Add Task"):
-            if new_task_name: add_checklist_item(new_task_name, new_task_tag)
-            else: st.error("Name required!")
+    with col_check_2:
+        if not checklist_df.empty:
+            main_tasks = checklist_df[checklist_df["Tag"] != "Shopping"]
+            if not main_tasks.empty:
+                for i, row in main_tasks.iterrows():
+                    with st.container():
+                        c1, c2, c3, c4 = st.columns([0.1, 0.6, 0.2, 0.1])
+                        is_checked = bool(row["Status"] == 1)
+                        with c1:
+                            if st.checkbox("Done", value=is_checked, key=f"main_{i}", label_visibility="collapsed"):
+                                if not is_checked: toggle_checklist_item(i, True)
+                            else:
+                                if is_checked: toggle_checklist_item(i, False)
+                        with c2:
+                            if is_checked: st.markdown(f"~~{row['Task']}~~")
+                            else: st.markdown(f"**{row['Task']}**")
+                        with c3: st.caption(f"_{row['Tag']}_")
+                        with c4:
+                            if st.button("🗑️", key=f"del_main_{i}"): delete_checklist_item(i)
+                        st.divider()
+            else: st.info("No recurring tasks set.")
 
-with col_check_2:
-    if not checklist_df.empty:
-        # Filter out "Shopping" from main view
-        main_tasks = checklist_df[checklist_df["Tag"] != "Shopping"]
-        
-        if not main_tasks.empty:
-            for i, row in main_tasks.iterrows():
-                # Card-like layout
-                with st.container():
-                    c1, c2, c3, c4 = st.columns([0.1, 0.6, 0.2, 0.1])
-                    is_checked = bool(row["Status"] == 1)
-                    
-                    with c1:
-                        # The Checkbox Logic
-                        if st.checkbox("Done", value=is_checked, key=f"main_{i}", label_visibility="collapsed"):
-                            if not is_checked: toggle_checklist_item(i, True)
-                        else:
-                            if is_checked: toggle_checklist_item(i, False)
-                    
-                    with c2:
-                        # Strikethrough if done
-                        if is_checked: st.markdown(f"~~{row['Task']}~~")
-                        else: st.markdown(f"**{row['Task']}**")
-                    
-                    with c3:
-                        st.caption(f"_{row['Tag']}_")
-                    
-                    with c4:
-                        if st.button("🗑️", key=f"del_main_{i}"):
-                             delete_checklist_item(i)
-                    st.divider()
-        else:
-            st.info("No recurring tasks set.")
-
-# 6. ANALYTICS
+# 6. ANALYTICS (EXPANDER)
 if not df.empty:
     st.divider()
     with st.expander("📊 Analytics & History (Click to Open)", expanded=False):
+        # ... (Keep existing Analytics Logic logic here) ...
         df["Date_Obj"] = pd.to_datetime(df["Date"])
         df["Week_Num"] = df["Date_Obj"].dt.isocalendar().week
         df["Year"] = df["Date_Obj"].dt.isocalendar().year
